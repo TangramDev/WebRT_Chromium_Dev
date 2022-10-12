@@ -85,11 +85,11 @@ as shown in the following figure:</p>
 
 <p>execute the following command:
 
-	$ ..\getbranch chromium_tag WebRTBase
+	$ ..\getbranch 108.0.53xx.y WebRTBase
 </p>
 <p>
 	
-Here, chromium_tag is the Tag value contained in <i>[ChromiumVer.txt](https://github.com/TangramDev/WebRT_Chromium_Dev/blob/main/ChromiumVer.txt)</i>, and WebRTBase is the branch name of "WebRT Base Branch"</p>
+Here, 108.0.53xx.y is the Tag value contained in <i>[ChromiumVer.txt](https://github.com/TangramDev/WebRT_Chromium_Dev/blob/main/ChromiumVer.txt)</i>, and WebRTBase is the branch name of "WebRT Base Branch"</p>
 
 <p>Copy the folder "ChromiumSRC\src" (this folder is included in the unzipped folder of Chromium WebRT Patch) to "d:\WebRT\M108\src", execute the following command:
 	
@@ -100,12 +100,12 @@ Here, chromium_tag is the Tag value contained in <i>[ChromiumVer.txt](https://gi
 
 <h1 align=center>
 
-WebRuntime based on a <i>Specific Chromium Project Dev Version: 108.0.5xxx.y</i>
+WebRuntime based on a <i>Specific Chromium Project Dev Version: 108.0.53ab.c</i>
 </h1>
 <h2>
 <p>Execute the following command:
 	
-	$ ..\getWebRTbranch 108.0.5xxx.y your_branch_name WebRTBase
+	$ ..\getWebRTbranch 108.0.53ab.c your_branch_name WebRTBase
 Here, WebRTBase is the source code branch that supports WebRuntime created in the above steps, and x is an integer, you will obtain a branch with webruntime support you expected.
 </p>
 </h2>
