@@ -109,3 +109,27 @@ WebRuntime based on<br/> a <i>Specific Chromium Project Dev Version: 108.0.53ab.
 Here, WebRTBase is the source code branch that supports WebRuntime created in the above steps, and x is an integer, you will obtain a branch with webruntime support you expected.
 </p>
 </h2>
+
+<h1 align=center>
+
+Generate <i>Visual Studio</i> Solution
+</h1>
+<h2>
+<p>Execute the following command:
+	
+	$ ..\gb
+Normally, you need to delete the default subfolder of the out folder
+</p>
+</h2>
+
+<h1 align=center>
+
+Compiling <i>Chromium with WebRuntime Support</i>
+</h1>
+<h2>
+<p>Execute the following command:
+	
+	$ ..\bd tasknumber
+Normally, tasknumber=2*cpucorenumber+2.
+</p>
+</h2>
