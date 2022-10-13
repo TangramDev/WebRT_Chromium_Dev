@@ -85,7 +85,7 @@ as shown in the following figure:</p>
 
 <p>execute the following command:
 
-	$ ..\getbranch 108.0.53xx.y WebRTBase
+	$ ..\getbranch 53xx.y WebRTBase
 </p>
 <p>
 	
@@ -105,8 +105,8 @@ WebRuntime based on<br/> a <i>Specific Chromium Project Dev Version: 108.0.53ab.
 <h2>
 <p>Execute the following command:
 	
-	$ ..\getWebRTbranch 108.0.53ab.c your_branch_name WebRTBase
-Here, WebRTBase is the source code branch that supports WebRuntime created in the above steps, and x is an integer, you will obtain a branch with webruntime support you expected.
+	$ ..\getWebRTbranch 53ab.c your_branch_name WebRTBase
+Here, WebRTBase is the source code branch that supports WebRuntime created in the above steps, and a, b and c is are integers, you will obtain a branch with webruntime support you expected.
 </p>
 </h2>
 
