@@ -83,8 +83,8 @@
 #include "content/browser/media/webaudio/audio_context_manager_impl.h"
 #include "content/browser/navigation_or_document_handle.h"
 #include "content/browser/navigation_subresource_loader_params.h"
-#include "content/browser/net/cross_origin_embedder_policy_reporter.h"
-#include "content/browser/net/cross_origin_opener_policy_reporter.h"
+#include "content/browser/network/cross_origin_embedder_policy_reporter.h"
+#include "content/browser/network/cross_origin_opener_policy_reporter.h"
 #include "content/browser/permissions/permission_controller_impl.h"
 #include "content/browser/permissions/permission_service_context.h"
 #include "content/browser/portal/portal.h"
@@ -437,6 +437,13 @@ using TokenFrameMap = std::unordered_map<blink::LocalFrameToken,
                                          blink::LocalFrameToken::Hasher>;
 base::LazyInstance<TokenFrameMap>::Leaky g_token_frame_map =
     LAZY_INSTANCE_INITIALIZER;
+
+auto& GetDocumentTokenMap() {
+  static base::NoDestructor<std::unordered_map<
+      blink::DocumentToken, RenderFrameHostImpl*, blink::DocumentToken::Hasher>>
+      map;
+  return *map;
+}
 
 BackForwardCacheMetrics::NotRestoredReason
 RendererEvictionReasonToNotRestoredReason(
@@ -1214,7 +1221,7 @@ bool ValidateUnfencedTopNavigation(
   }
 
   // Perform checks that normally would be performed in
-  // `blink::CanNavigateHelper` but that we skipped because the target
+  // `blink::CanNavigate` but that we skipped because the target
   // frame wasn't available in the renderer.
   // TODO(crbug.com/1123606): Change these checks to send a BadMessage
   // when the renderer-side refactor is complete.
@@ -1291,6 +1298,35 @@ void RecordIdentifiabilityDocumentCreatedMetrics(
         .SetIsCrossOriginFrame(is_cross_origin_frame)
         .SetIsCrossSiteFrame(is_cross_site_frame)
         .Record(ukm_recorder);
+  }
+}
+
+bool PopupInheritCOOP(const RenderFrameHostImpl* opener) {
+  return opener->GetLastCommittedOrigin() ==
+         opener->GetMainFrame()->GetLastCommittedOrigin();
+}
+
+// See https://html.spec.whatwg.org/C/#browsing-context-names (step 8)
+// ```
+// If current's top-level browsing context's active document's
+// cross-origin opener policy's value is "same-origin" or
+// "same-origin-plus-COEP", then [...] set noopener to true, name to
+// "_blank", and windowType to "new with no opener".
+// ```
+bool CoopSuppressOpener(const RenderFrameHostImpl* opener) {
+  // Those values are explicitly listed here, to force creator of new
+  // values to make an explicit decision in the future.
+  // See regression: https://crbug.com/1181673
+  switch (opener->GetMainFrame()->cross_origin_opener_policy().value) {
+    case network::mojom::CrossOriginOpenerPolicyValue::kUnsafeNone:
+    case network::mojom::CrossOriginOpenerPolicyValue::kSameOriginAllowPopups:
+    case network::mojom::CrossOriginOpenerPolicyValue::kRestrictProperties:
+    case network::mojom::CrossOriginOpenerPolicyValue::
+        kRestrictPropertiesPlusCoep:
+      return false;
+    case network::mojom::CrossOriginOpenerPolicyValue::kSameOrigin:
+    case network::mojom::CrossOriginOpenerPolicyValue::kSameOriginPlusCoep:
+      return !PopupInheritCOOP(opener);
   }
 }
 
@@ -1559,6 +1595,29 @@ RenderFrameHostImpl* RenderFrameHostImpl::FromFrameToken(
           .Run(
               "Unknown LocalFrame made RenderFrameHost::FromFrameToken "
               "request.");
+    }
+    return nullptr;
+  }
+
+  return it->second;
+}
+
+// static
+RenderFrameHostImpl* RenderFrameHostImpl::FromDocumentToken(
+    int process_id,
+    const blink::DocumentToken& document_token,
+    mojo::ReportBadMessageCallback* process_mismatch_callback) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  const auto it = GetDocumentTokenMap().find(document_token);
+  if (it == GetDocumentTokenMap().end())
+    return nullptr;
+
+  if (it->second->GetProcess()->GetID() != process_id) {
+    if (process_mismatch_callback) {
+      SYSLOG(WARNING)
+          << "Denying illegal RenderFrameHost::FromDocumentToken request.";
+      std::move(*process_mismatch_callback)
+          .Run("process ID does not match requested DocumentToken");
     }
     return nullptr;
   }
@@ -3050,16 +3109,12 @@ RenderFrameHostImpl::AccessibilityGetNativeViewAccessibleForWindow() {
   return nullptr;
 }
 
-RenderFrameHostImpl* RenderFrameHostImpl::AccessibilityRenderFrameHost() {
-  return this;
-}
-
 void RenderFrameHostImpl::AccessibilityHitTest(
     const gfx::Point& point_in_frame_pixels,
-    ax::mojom::Event opt_event_to_fire,
+    const ax::mojom::Event& opt_event_to_fire,
     int opt_request_id,
-    base::OnceCallback<void(BrowserAccessibilityManager* hit_manager,
-                            int hit_node_id)> opt_callback) {
+    base::OnceCallback<void(ui::AXPlatformTreeManager* hit_manager,
+                            ui::AXNodeID hit_node_id)> opt_callback) {
   // This is called by BrowserAccessibilityManager. During teardown it's
   // possible that render_accessibility_ is null but the corresponding
   // BrowserAccessibilityManager still exists and could call this.
@@ -3077,7 +3132,7 @@ void RenderFrameHostImpl::AccessibilityHitTest(
                      opt_event_to_fire, std::move(opt_callback)));
 }
 
-bool RenderFrameHostImpl::AccessibilityIsRootFrame() {
+bool RenderFrameHostImpl::AccessibilityIsRootFrame() const {
   // Do not use is_main_frame() or IsOutermostMainFrame().
   // Frame trees may be nested so it can be the case that is_main_frame() is
   // true, but is not the outermost RenderFrameHost (it only checks for nullity
@@ -3086,6 +3141,10 @@ bool RenderFrameHostImpl::AccessibilityIsRootFrame() {
   // does not escape guest views. Therefore, we must check for any kind of
   // parent document or embedder.
   return !GetParentOrOuterDocumentOrEmbedder();
+}
+
+RenderFrameHostImpl* RenderFrameHostImpl::AccessibilityRenderFrameHost() {
+  return this;
 }
 
 WebContentsAccessibility*
@@ -3137,7 +3196,8 @@ void RenderFrameHostImpl::InitializePolicyContainerHost(
             parent_policies.cross_origin_opener_policy,
             parent_policies.cross_origin_embedder_policy,
             network::mojom::WebSandboxFlags::kNone,
-            /*is_anonymous=*/false)));
+            /*is_anonymous=*/false,
+            /*can_navigate_top_without_user_gesture=*/true)));
   } else if (frame_tree_node_->opener()) {
     // During a `window.open(...)` without `noopener`, a new popup is created
     // and always starts from the initial empty document. The opener has
@@ -7510,51 +7570,15 @@ void RenderFrameHostImpl::CreateNewWindow(
         dom_storage_context, params->session_storage_namespace_id);
   }
 
-  RenderFrameHostImpl* top_level_opener = GetMainFrame();
-  bool coop_is_inherited = true;
-  if (IsAnonymous() || IsNestedWithinFencedFrame()) {
+  if (IsAnonymous() || IsNestedWithinFencedFrame() ||
+      CoopSuppressOpener(/*opener=*/this)) {
     params->opener_suppressed = true;
+    // TODO(https://crbug.com/1060691) This should be applied to all
+    // popups opened with noopener.
     params->frame_name.clear();
-  } else {
-    // Check that this RFH and its main document are same origin.
-    if (!top_level_opener->GetLastCommittedOrigin().IsSameOriginWith(
-            GetLastCommittedOrigin())) {
-      // The documents are cross origin, the PolicyContainer did not inherit the
-      // top-level COOP value, and the initial empty document will have a COOP
-      // value of unsafe-none.
-      coop_is_inherited = false;
-      switch (top_level_opener->cross_origin_opener_policy().value) {
-        // Those values are explicitly listed here, to force creator of new
-        // values to make an explicit decision in the future.
-        // See regression: https://crbug.com/1181673
-        case network::mojom::CrossOriginOpenerPolicyValue::kUnsafeNone:
-        case network::mojom::CrossOriginOpenerPolicyValue::
-            kSameOriginAllowPopups:
-        case network::mojom::CrossOriginOpenerPolicyValue::kRestrictProperties:
-        case network::mojom::CrossOriginOpenerPolicyValue::
-            kRestrictPropertiesPlusCoep:
-          break;
-
-        // See https://html.spec.whatwg.org/C/#browsing-context-names (step 8)
-        // ```
-        // If current's top-level browsing context's active document's
-        // cross-origin opener policy's value is "same-origin" or
-        // "same-origin-plus-COEP", then [...] set noopener to true, name to
-        // "_blank", and windowType to "new with no opener".
-        // ```
-        case network::mojom::CrossOriginOpenerPolicyValue::kSameOrigin:
-        case network::mojom::CrossOriginOpenerPolicyValue::kSameOriginPlusCoep:
-          DCHECK(base::FeatureList::IsEnabled(
-              network::features::kCrossOriginOpenerPolicy));
-          params->opener_suppressed = true;
-          // The frame name should not be forwarded to a noopener popup.
-          // TODO(https://crbug.com/1060691) This should be applied to all
-          // popups opened with noopener.
-          params->frame_name.clear();
-      }
-    }
   }
 
+  RenderFrameHostImpl* top_level_opener = GetMainFrame();
   int popup_virtual_browsing_context_group =
       params->opener_suppressed
           ? CrossOriginOpenerPolicyAccessReportManager::
@@ -7602,15 +7626,15 @@ void RenderFrameHostImpl::CreateNewWindow(
   new_main_rfh->soap_by_default_virtual_browsing_context_group_ =
       popup_soap_by_default_virtual_browsing_context_group;
 
-  // If COOP is inherited (via the PolicyContainer) by the initial empty
-  // document, inherit the COOP reporter as well.
-  if (coop_is_inherited &&
+  // COOP and COOP reporter are inherited from the opener to the popup's initial
+  // empty document.
+  if (PopupInheritCOOP(/*opener=*/this) &&
       GetMainFrame()->coop_access_report_manager()->coop_reporter()) {
     new_main_rfh->SetCrossOriginOpenerPolicyReporter(
         std::make_unique<CrossOriginOpenerPolicyReporter>(
             GetProcess()->GetStoragePartition(), GetLastCommittedURL(),
             params->referrer->url, new_main_rfh->cross_origin_opener_policy(),
-            GetReportingSource(), isolation_info_.network_isolation_key()));
+            GetReportingSource(), isolation_info_.network_anonymization_key()));
   }
 
   mojo::PendingAssociatedRemote<mojom::Frame> pending_frame_remote;
@@ -9919,14 +9943,6 @@ void RenderFrameHostImpl::UpdateAccessibilityMode() {
     // in the renderer.
     render_accessibility_.reset();
   }
-
-  if (!ax_mode.has_mode(ui::kAXModeBasic.mode()) &&
-      browser_accessibility_manager_) {
-    // Missing either kWebContents and kNativeAPIs, so
-    // BrowserAccessibilityManager is no longer necessary.
-    browser_accessibility_manager_->DetachFromParentManager();
-    browser_accessibility_manager_.reset();
-  }
 }
 
 void RenderFrameHostImpl::RequestAXTreeSnapshot(
@@ -10161,7 +10177,7 @@ FrameTreeNode* RenderFrameHostImpl::GetSibling(int relative_offset) const {
 }
 
 RenderFrameHostImpl* RenderFrameHostImpl::GetMainFrame() {
-  return const_cast<RenderFrameHostImpl*>(base::as_const(*this).GetMainFrame());
+  return const_cast<RenderFrameHostImpl*>(std::as_const(*this).GetMainFrame());
 }
 
 const RenderFrameHostImpl* RenderFrameHostImpl::GetMainFrame() const {
@@ -10478,8 +10494,8 @@ ui::AXTreeData RenderFrameHostImpl::GetAXTreeData() {
 void RenderFrameHostImpl::AccessibilityHitTestCallback(
     int request_id,
     ax::mojom::Event event_to_fire,
-    base::OnceCallback<void(BrowserAccessibilityManager* hit_manager,
-                            int hit_node_id)> opt_callback,
+    base::OnceCallback<void(ui::AXPlatformTreeManager* hit_manager,
+                            ui::AXNodeID hit_node_id)> opt_callback,
     blink::mojom::HitTestResponsePtr hit_test_response) {
   if (!hit_test_response) {
     if (opt_callback)
@@ -10872,7 +10888,7 @@ void RenderFrameHostImpl::CreateWebTransportConnector(
   mojo::MakeSelfOwnedReceiver(
       std::make_unique<WebTransportConnectorImpl>(
           GetProcess()->GetID(), weak_ptr_factory_.GetWeakPtr(),
-          last_committed_origin_, isolation_info_.network_isolation_key()),
+          last_committed_origin_, isolation_info_.network_anonymization_key()),
       std::move(receiver));
 }
 
@@ -11014,6 +11030,14 @@ void RenderFrameHostImpl::GetSensorProvider(
 
 void RenderFrameHostImpl::BindCacheStorage(
     mojo::PendingReceiver<blink::mojom::CacheStorage> receiver) {
+  BindCacheStorageInternal(
+      std::move(receiver),
+      storage::BucketLocator::ForDefaultBucket(storage_key()));
+}
+
+void RenderFrameHostImpl::BindCacheStorageInternal(
+    mojo::PendingReceiver<blink::mojom::CacheStorage> receiver,
+    const storage::BucketLocator& bucket_locator) {
   mojo::PendingRemote<network::mojom::CrossOriginEmbedderPolicyReporter>
       coep_reporter_remote;
   if (coep_reporter_) {
@@ -11021,8 +11045,8 @@ void RenderFrameHostImpl::BindCacheStorage(
         coep_reporter_remote.InitWithNewPipeAndPassReceiver());
   }
   GetProcess()->BindCacheStorage(cross_origin_embedder_policy(),
-                                 std::move(coep_reporter_remote), storage_key(),
-                                 std::move(receiver));
+                                 std::move(coep_reporter_remote),
+                                 bucket_locator, std::move(receiver));
 }
 
 void RenderFrameHostImpl::BindInputInjectorReceiver(
@@ -11260,7 +11284,7 @@ RenderFrameHostImpl::CreateNavigationRequestForSynchronousRendererCommit(
         storage_partition->GetWeakPtr(), url,
         cross_origin_embedder_policy().reporting_endpoint,
         cross_origin_embedder_policy().report_only_reporting_endpoint,
-        GetReportingSource(), isolation_info.network_isolation_key());
+        GetReportingSource(), isolation_info.network_anonymization_key());
   }
   std::unique_ptr<WebBundleNavigationInfo> web_bundle_navigation_info;
   if (is_same_document && web_bundle_handle_ &&
@@ -12428,7 +12452,7 @@ void RenderFrameHostImpl::MaybeGenerateCrashReport(
   // Send the crash report to the Reporting API.
   GetProcess()->GetStoragePartition()->GetNetworkContext()->QueueReport(
       /*type=*/"crash", /*group=*/"default", last_committed_url_,
-      GetReportingSource(), isolation_info_.network_isolation_key(),
+      GetReportingSource(), isolation_info_.network_anonymization_key(),
       absl::nullopt /* user_agent */, std::move(body));
 }
 
@@ -14620,15 +14644,16 @@ blink::mojom::PermissionStatus RenderFrameHostImpl::GetPermissionStatus(
 void RenderFrameHostImpl::BindCacheStorageForBucket(
     const storage::BucketInfo& bucket,
     mojo::PendingReceiver<blink::mojom::CacheStorage> receiver) {
-  // TODO(estade): pass the bucket rather than the storage key to support
-  // non-default buckets.
-  BindCacheStorage(std::move(receiver));
+  BindCacheStorageInternal(std::move(receiver), bucket.ToBucketLocator());
 }
 
 RenderFrameHostImpl::DocumentAssociatedData::DocumentAssociatedData(
     RenderFrameHostImpl& document,
     const blink::DocumentToken& token)
     : token_(token), weak_factory_(&document) {
+  auto [_, inserted] = GetDocumentTokenMap().insert({token_, &document});
+  CHECK(inserted);
+
   // Only create page object for the main document as the PageImpl is 1:1 with
   // main document.
   if (!document.GetParent()) {
@@ -14649,6 +14674,10 @@ RenderFrameHostImpl::DocumentAssociatedData::~DocumentAssociatedData() {
   // Explicitly clear all user data here, so that the other fields of
   // DocumentAssociatedData are still valid while user data is being destroyed.
   ClearAllUserData();
+
+  // Last in case any DocumentService / DocumentUserData service destructors try
+  // to look up RenderFrameHosts by DocumentToken.
+  CHECK_EQ(1u, GetDocumentTokenMap().erase(token_));
 }
 
 // begin Add by TangramTeam

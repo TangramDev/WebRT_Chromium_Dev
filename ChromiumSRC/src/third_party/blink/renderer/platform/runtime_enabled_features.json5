@@ -449,6 +449,14 @@
       status: "stable",
     },
     {
+      name: "ClearIdentityInCanMakePaymentEvent",
+      base_feature: "ClearIdentityInCanMakePaymentEvent",
+      origin_trial_allows_third_party: true,
+      origin_trial_feature_name: "IdentityInCanMakePaymentEventFeature",
+      origin_trial_type: "deprecation",
+      public: true,
+    },
+    {
       name: "ClickToCapturedPointer",
       status: "experimental",
     },
@@ -684,6 +692,10 @@
       // https://crrev.com/f311a84728272e30979432e8474089b3db3c67df
       name: "CSSHexAlphaColor",
       status: "stable",
+    },
+    {
+      // crbug.com/924069
+      name: "CSSHyphenateLimitChars",
     },
     {
       name: "CSSIcUnit",
@@ -1243,6 +1255,9 @@
       origin_trial_allows_third_party: true,
     },
     {
+      name: "FluentScrollbars",
+    },
+    {
       name: "Focusgroup",
       status: "experimental",
       origin_trial_feature_name: "Focusgroup",
@@ -1399,14 +1414,6 @@
     {
       name: "IDBBatchGetAll",
       status:"experimental",
-    },
-    {
-      name: "IdentityInCanMakePaymentEventFeature",
-      origin_trial_allows_third_party: true,
-      origin_trial_feature_name: "IdentityInCanMakePaymentEventFeature",
-      origin_trial_type: "deprecation",
-      public: true,
-      status: "stable",
     },
     {
       name: "IdleDetection",
@@ -2744,6 +2751,10 @@
       name: "ViewportHeightClientHintHeader",
       status: "stable",
       base_feature: "ViewportHeightClientHintHeader",
+    },
+    {
+      name: "ViewportMetaInteractiveWidgetProperty",
+      status: "experimental",
     },
     {
       name: "ViewportSegments",

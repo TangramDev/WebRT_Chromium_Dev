@@ -212,6 +212,7 @@
 #include "third_party/blink/public/web/web_navigation_control.h"
 #include "third_party/blink/public/web/web_navigation_policy.h"
 #include "third_party/blink/public/web/web_navigation_timings.h"
+#include "third_party/blink/public/web/web_navigation_type.h"
 #include "third_party/blink/public/web/web_performance.h"
 #include "third_party/blink/public/web/web_picture_in_picture_window_options.h"
 #include "third_party/blink/public/web/web_plugin.h"
@@ -376,7 +377,8 @@ ui::PageTransition GetTransitionType(ui::PageTransition default_transition,
   }
   bool is_form_submit =
       navigation_type == blink::kWebNavigationTypeFormSubmitted ||
-      navigation_type == blink::kWebNavigationTypeFormResubmitted;
+      navigation_type == blink::kWebNavigationTypeFormResubmittedBackForward ||
+      navigation_type == blink::kWebNavigationTypeFormResubmittedReload;
   if (ui::PageTransitionCoreTypeIs(default_transition,
                                    ui::PAGE_TRANSITION_LINK) &&
       is_form_submit) {
@@ -2634,8 +2636,7 @@ void RenderFrameImpl::CommitNavigation(
   navigation_params->policy_container =
       ToWebPolicyContainer(std::move(policy_container));
 
-  if (blink::IsIsolatedApplication() && frame_->IsOutermostMainFrame() &&
-      permissions_policy) {
+  if (frame_->IsOutermostMainFrame() && permissions_policy) {
     navigation_params->permissions_policy_override = permissions_policy;
   }
 
@@ -3167,15 +3168,13 @@ void RenderFrameImpl::UpdateSubresourceLoaderFactories(
     DCHECK(!subresource_loader_factories->pending_isolated_world_factories()
                 .empty());
 
-#if DCHECK_IS_ON()
-    // This situation should happen only if the frame hosts a document that
-    // isn't related to a real navigation (i.e. if an initial empty document
-    // should "inherit" the factories from its opener/parent).
-    WebURL url = GetWebFrame()->GetDocument().Url();
-    DCHECK(!GURL(url).IsAboutSrcdoc());
-    if (url.IsValid() && !url.IsEmpty())
-      DCHECK(url.ProtocolIs(url::kAboutScheme));
-#endif
+    // `!IsHostChildURLLoaderFactoryBundle` should only happen if the frame
+    // hosts a document that isn't related to a real navigation (i.e. if an
+    // initial empty document should "inherit" the factories from its
+    // opener/parent).
+    DCHECK_EQ(NavigationCommitState::kInitialEmptyDocument,
+              navigation_commit_state_);
+
     auto partial_bundle =
         base::MakeRefCounted<blink::ChildURLLoaderFactoryBundle>();
     static_cast<blink::URLLoaderFactoryBundle*>(partial_bundle.get())
@@ -5699,8 +5698,10 @@ void RenderFrameImpl::BeginNavigationInternal(
          info->frame_type == blink::mojom::RequestContextFrameType::kNested);
 
   bool is_form_submission =
-      info->navigation_type == blink::kWebNavigationTypeFormSubmitted ||
-      info->navigation_type == blink::kWebNavigationTypeFormResubmitted;
+      (info->navigation_type == blink::kWebNavigationTypeFormSubmitted ||
+       info->navigation_type ==
+           blink::kWebNavigationTypeFormResubmittedBackForward ||
+       info->navigation_type == blink::kWebNavigationTypeFormResubmittedReload);
 
   bool was_initiated_by_link_click =
       info->navigation_type == blink::kWebNavigationTypeLinkClicked;
