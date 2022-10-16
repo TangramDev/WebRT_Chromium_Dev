@@ -3,12 +3,12 @@ Working with <i>Latest Chromium Dev Source Code</i>
 </h1>
 <h2  align=left><p>
 
-We designed [OpenWebRuntime](https://github.com/TangramDev/OpenWebRunTime) to work in sync with the latest Chromium Dev Source Code for Chromium Dev Version. To do this, you need to refer to the 
+[OpenWebRuntime](https://github.com/TangramDev/OpenWebRunTime) can work synchronously with the <i>Latest Dev Version Chromium Project</i> Source Code, to do this, you need to refer to the 
 <div align=center>
 
 [**Building Chromium for Windows**](https://chromium.googlesource.com/chromium/src/+/main/docs/windows_build_instructions.md)</div>
 
-to obtain the source code of the latest full version of the Chromium Project, and to ensure that this version can be compiled correctly so that the compiled results can run properly. The IDE Environment we work here is Visual Studio 2022 17.3.5, which requires C++/CLI support.</p>
+to fetch the source code of the latest <i>Full Version of the Chromium Project</i>, and to ensure that this version can be compiled correctly so that the compiled results can run properly. The IDE Environment we work here is Visual Studio 2022 17.3.5(requires C++/CLI support).</p>
 </p> 
 </h2>
 <h1 align=center>
