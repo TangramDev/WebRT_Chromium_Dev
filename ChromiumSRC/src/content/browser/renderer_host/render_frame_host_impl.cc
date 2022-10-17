@@ -11593,7 +11593,7 @@ bool RenderFrameHostImpl::ValidateDidCommitParams(
               .required_document_policy,
           params->document_policy_header)) {
     bad_message::ReceivedBadMessage(
-        GetProcess(), bad_message::RFH_BAD_DOCUMENT_POLICY_HEADER);
+        process, bad_message::RFH_BAD_DOCUMENT_POLICY_HEADER);
     return false;
   }
 
@@ -11602,7 +11602,7 @@ bool RenderFrameHostImpl::ValidateDidCommitParams(
   base::WeakPtr<RenderFrameHostImpl> old_frame_host =
       frame_tree_node_->render_manager()->current_frame_host()->GetWeakPtr();
   if (is_same_document_navigation && this != old_frame_host.get()) {
-    bad_message::ReceivedBadMessage(this->GetProcess(),
+    bad_message::ReceivedBadMessage(process,
                                     bad_message::NI_IN_PAGE_NAVIGATION);
     return false;
   }
@@ -11615,8 +11615,7 @@ bool RenderFrameHostImpl::ValidateDidCommitParams(
                                          .controller()
                                          .has_post_commit_error_entry()) {
     bad_message::ReceivedBadMessage(
-        frame_tree_node_->render_manager()->current_frame_host()->GetProcess(),
-        bad_message::NC_SAME_DOCUMENT_POST_COMMIT_ERROR);
+        process, bad_message::NC_SAME_DOCUMENT_POST_COMMIT_ERROR);
     return false;
   }
 
@@ -11626,7 +11625,7 @@ bool RenderFrameHostImpl::ValidateDidCommitParams(
       // Terminate the renderer if allowing this subframe navigation to commit
       // would change the origin of the main frame.
       bad_message::ReceivedBadMessage(
-          GetProcess(),
+          process,
           bad_message::RFHI_SUBFRAME_NAV_WOULD_CHANGE_MAINFRAME_ORIGIN);
       return false;
     }
@@ -12100,7 +12099,7 @@ bool RenderFrameHostImpl::DidCommitNavigationInternal(
     // main frames can be recorded.
     // TODO(crbug.com/1245014): For prerendering pages, record the source url
     // after activation.
-    if (frame_tree_node()->GetFrameType() == FrameType::kPrimaryMainFrame &&
+    if (navigation_request->IsInPrimaryMainFrame() &&
         document_ukm_source_id != ukm::kInvalidSourceId) {
       ukm_recorder->UpdateSourceURL(document_ukm_source_id, params->url);
     }
@@ -12129,9 +12128,10 @@ bool RenderFrameHostImpl::DidCommitNavigationInternal(
   }
 
   // TODO(https://crbug.com/1131832): Do not pass |params| to DidNavigate().
-  frame_tree_node()->navigator().DidNavigate(this, *params,
-                                             std::move(navigation_request),
-                                             is_same_document_navigation);
+  NavigationRequest* raw_navigation_request = navigation_request.get();
+  raw_navigation_request->frame_tree_node()->navigator().DidNavigate(
+      this, *params, std::move(navigation_request),
+      is_same_document_navigation);
 
   // Reset back the state to false after navigation commits.
   // TODO(https://crbug.com/1072817): Undo this plumbing after removing the
