@@ -54,7 +54,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/welcome/helpers.h"
 #include "chrome/browser/ui/webui/whats_new/whats_new_util.h"
-#include "chrome/browser/web_applications/isolated_web_apps/install_isolated_app_from_command_line.h"
+#include "chrome/browser/web_applications/isolated_web_apps/install_isolated_web_app_from_command_line.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/browser/web_applications/web_app_provider_factory.h"
 #include "chrome/common/chrome_switches.h"
@@ -298,7 +298,7 @@ void StartupBrowserCreatorImpl::MaybeToggleFullscreen(Browser* browser) {
 void StartupBrowserCreatorImpl::Launch(
     Profile* profile,
     chrome::startup::IsProcessStartup process_startup,
-    std::unique_ptr<LaunchModeRecorder> launch_mode_recorder) {
+    std::unique_ptr<OldLaunchModeRecorder> launch_mode_recorder) {
   DCHECK(profile);
   profile_ = profile;
 
@@ -344,12 +344,12 @@ void StartupBrowserCreatorImpl::Launch(
   if (launch_mode_recorder) {
     if (!command_line_.GetSwitchValueNative(switches::kTryChromeAgain)
              .empty()) {
-      launch_mode_recorder->SetLaunchMode(LaunchMode::kUserExperiment);
+      launch_mode_recorder->SetLaunchMode(OldLaunchMode::kUserExperiment);
     } else {
       launch_mode_recorder->SetLaunchMode(launch_result ==
                                                   LaunchResult::kWithGivenUrls
-                                              ? LaunchMode::kWithUrls
-                                              : LaunchMode::kToBeDecided);
+                                              ? OldLaunchMode::kWithUrls
+                                              : OldLaunchMode::kToBeDecided);
     }
   }
 

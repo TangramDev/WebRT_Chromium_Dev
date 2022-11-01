@@ -44,7 +44,8 @@
 #include "content/browser/buckets/bucket_context.h"
 #include "content/browser/can_commit_status.h"
 #include "content/browser/network/cross_origin_opener_policy_reporter.h"
-#include "content/browser/preloading/prerender/prerender_host.h"
+#include "content/browser/preloading/prerender/prerender_final_status.h"
+#include "content/browser/renderer_host/back_forward_cache_impl.h"
 #include "content/browser/renderer_host/back_forward_cache_metrics.h"
 #include "content/browser/renderer_host/browsing_context_state.h"
 #include "content/browser/renderer_host/code_cache_host_impl.h"
@@ -112,10 +113,12 @@
 #include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/mojom/back_forward_cache_not_restored_reasons.mojom.h"
+#include "third_party/blink/public/mojom/blob/blob_url_store.mojom-forward.h"
 #include "third_party/blink/public/mojom/bluetooth/web_bluetooth.mojom-forward.h"
 #include "third_party/blink/public/mojom/broadcastchannel/broadcast_channel.mojom.h"
 #include "third_party/blink/public/mojom/feature_observer/feature_observer.mojom-forward.h"
 #include "third_party/blink/public/mojom/file_system_access/file_system_access_manager.mojom-forward.h"
+#include "third_party/blink/public/mojom/filesystem/file_system.mojom-forward.h"
 #include "third_party/blink/public/mojom/font_access/font_access.mojom-forward.h"
 #include "third_party/blink/public/mojom/frame/back_forward_cache_controller.mojom.h"
 #include "third_party/blink/public/mojom/frame/find_in_page.mojom.h"
@@ -129,9 +132,11 @@
 #include "third_party/blink/public/mojom/installedapp/installed_app_provider.mojom-forward.h"
 #include "third_party/blink/public/mojom/loader/resource_load_info.mojom-forward.h"
 #include "third_party/blink/public/mojom/navigation/navigation_params.mojom-forward.h"
+#include "third_party/blink/public/mojom/navigation/navigation_params.mojom.h"
 #include "third_party/blink/public/mojom/navigation/renderer_eviction_reason.mojom.h"
 #include "third_party/blink/public/mojom/notifications/notification_service.mojom-forward.h"
 #include "third_party/blink/public/mojom/peerconnection/peer_connection_tracker.mojom-forward.h"
+#include "third_party/blink/public/mojom/permissions/permission.mojom-forward.h"
 #include "third_party/blink/public/mojom/portal/portal.mojom-forward.h"
 #include "third_party/blink/public/mojom/presentation/presentation.mojom-forward.h"
 #include "third_party/blink/public/mojom/render_accessibility.mojom.h"
@@ -142,6 +147,7 @@
 #include "third_party/blink/public/mojom/webauthn/authenticator.mojom-forward.h"
 #include "third_party/blink/public/mojom/webauthn/virtual_authenticator.mojom-forward.h"
 #include "third_party/blink/public/mojom/webid/federated_auth_request.mojom-forward.h"
+#include "third_party/blink/public/mojom/websockets/websocket_connector.mojom-forward.h"
 #include "third_party/blink/public/mojom/webtransport/web_transport_connector.mojom-forward.h"
 #include "third_party/blink/public/mojom/worker/dedicated_worker_host_factory.mojom-forward.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -150,6 +156,7 @@
 #include "ui/accessibility/platform/ax_platform_tree_manager.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/gfx/geometry/rect.h"
+#include "url/gurl.h"
 
 #if BUILDFLAG(IS_ANDROID)
 #include "base/containers/id_map.h"
@@ -984,6 +991,10 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // call FrameTreeNode::IsLoading.
   bool is_loading() const { return is_loading_; }
 
+  // Sets `is_loading_` to true to handle renderer debug URLs. This is needed
+  // to generate DidStopLoading events for these URLs.
+  void SetIsLoadingForRendererDebugURL() { is_loading_ = true; }
+
   // Returns true if this is a top-level frame, or if this frame
   // uses a proxy to communicate with its parent frame. Local roots are
   // distinguished by owning a RenderWidgetHost, which manages input events
@@ -1325,11 +1336,6 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // Allow tests to override how long to wait for beforeunload completion
   // callbacks to be invoked before timing out.
   void SetBeforeUnloadTimeoutDelayForTesting(const base::TimeDelta& timeout);
-
-  // Update the frame's opener in the renderer process in response to the
-  // opener being modified (e.g., with window.open or being set to null) in
-  // another renderer process.
-  void UpdateOpener();
 
   // Set this frame as focused in the renderer process.  This supports
   // cross-process window.focus() calls.
@@ -1971,6 +1977,13 @@ class CONTENT_EXPORT RenderFrameHostImpl
   void BindCacheStorage(
       mojo::PendingReceiver<blink::mojom::CacheStorage> receiver);
 
+  // For threaded worklets we expose an interface via BrowserInterfaceBrokers to
+  // bind `receiver` to a `BlobURLStore` instance, which implements the Blob URL
+  // API in the browser process. Note that this is only exposed when the
+  // kSupportPartitionedBlobUrl flag is enabled.
+  void BindBlobUrlStoreReceiver(
+      mojo::PendingReceiver<blink::mojom::BlobURLStore> receiver);
+
   void BindInputInjectorReceiver(
       mojo::PendingReceiver<mojom::InputInjector> receiver);
 
@@ -2036,7 +2049,7 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // frame is in, which destroys this frame.
   // Returns true if a prerender was canceled. Does nothing and returns false if
   // `this` is not prerendered.
-  bool CancelPrerendering(PrerenderHost::FinalStatus status);
+  bool CancelPrerendering(PrerenderFinalStatus status);
   // Called by MojoBinderPolicyApplier when it receives a kCancel interface.
   void CancelPrerenderingByMojoBinderPolicy(const std::string& interface_name);
 
@@ -3106,8 +3119,8 @@ class CONTENT_EXPORT RenderFrameHostImpl
   void UpdatePermissionsForNavigation(NavigationRequest* request);
 
   // Returns true if there is an active transient fullscreen allowance for the
-  // Window Placement feature (i.e. on screen configuration changes).
-  bool WindowPlacementAllowsFullscreen();
+  // Window Management feature (i.e. on screen configuration changes).
+  bool WindowManagementAllowsFullscreen();
 
   // Returns the latest NavigationRequest that has resulted in sending a Commit
   // IPC to the renderer process that hasn't yet been acked by the DidCommit IPC
@@ -3393,7 +3406,8 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // frames that have been opened by an OOPSIF are considered isolatable for the
   // purposes of this function, since they could lead to process overhead under
   // a per-origin isolation model. Assumes that `policy_container_host_` is set.
-  void UpdateIsolatableSandboxedIframeTracking();
+  void UpdateIsolatableSandboxedIframeTracking(
+      NavigationRequest* navigation_request);
 
   // Called when we receive the confirmation that a navigation committed in the
   // renderer. Used by both DidCommitSameDocumentNavigation and
@@ -3636,6 +3650,13 @@ class CONTENT_EXPORT RenderFrameHostImpl
   void CreateBroadcastChannelProvider(
       mojo::PendingAssociatedReceiver<blink::mojom::BroadcastChannelProvider>
           receiver);
+
+  // For frames and main thread worklets we use a navigation-associated
+  // interface and bind `receiver` to a `BlobURLStore` instance, which
+  // implements the Blob URL API in the browser process. Note that this is only
+  // exposed when the kSupportPartitionedBlobUrl flag is enabled.
+  void BindBlobUrlStoreAssociatedReceiver(
+      mojo::PendingAssociatedReceiver<blink::mojom::BlobURLStore> receiver);
 
   TraceProto::LifecycleState LifecycleStateToProto() const;
 

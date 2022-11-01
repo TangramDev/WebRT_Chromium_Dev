@@ -2915,7 +2915,7 @@ FrameScheduler* WebLocalFrameImpl::Scheduler() const {
 
 scheduler::WebAgentGroupScheduler* WebLocalFrameImpl::GetAgentGroupScheduler()
     const {
-  return Scheduler()->GetAgentGroupScheduler();
+  return &ViewImpl()->GetWebAgentGroupScheduler();
 }
 
 scoped_refptr<base::SingleThreadTaskRunner> WebLocalFrameImpl::GetTaskRunner(

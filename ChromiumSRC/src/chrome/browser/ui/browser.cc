@@ -228,7 +228,6 @@
 #include "net/base/filename_util.h"
 #include "ppapi/buildflags/buildflags.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
-#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/security/protocol_handler_security_level.h"
 #include "third_party/blink/public/mojom/frame/blocked_navigation_types.mojom.h"
 #include "third_party/blink/public/mojom/frame/frame.mojom.h"
@@ -635,12 +634,12 @@ Browser::~Browser() {
       !BrowserList::IsOffTheRecordBrowserInUse(profile_) &&
       !profile_->IsSystemProfile()) {
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
-      // The Printing Background Manager holds onto preview dialog WebContents
-      // whose corresponding print jobs have not yet fully spooled. Make sure
-      // these get destroyed before tearing down the incognito profile so that
-      // their render frame hosts can exit in time - see crbug.com/579155
-      g_browser_process->background_printing_manager()
-          ->DeletePreviewContentsForBrowserContext(profile_);
+    // The Printing Background Manager holds onto preview dialog WebContents
+    // whose corresponding print jobs have not yet fully spooled. Make sure
+    // these get destroyed before tearing down the incognito profile so that
+    // their RenderFrameHosts can exit in time - see crbug.com/579155
+    g_browser_process->background_printing_manager()
+        ->DeletePreviewContentsForBrowserContext(profile_);
 #endif
       // An incognito profile is no longer needed, this indirectly frees
       // its cache and cookies once it gets destroyed at the appropriate time.
@@ -1676,9 +1675,7 @@ void Browser::AddNewContents(
   // immediately if the popup would overlap the fullscreen window.
   NavigateParams::WindowAction window_action = NavigateParams::SHOW_WINDOW;
   if (disposition == WindowOpenDisposition::NEW_POPUP &&
-      fullscreen_controller->IsFullscreenForTabOrPending(source) &&
-      base::FeatureList::IsEnabled(
-          blink::features::kWindowPlacementFullscreenCompanionWindow)) {
+      fullscreen_controller->IsFullscreenForTabOrPending(source)) {
     window_action = NavigateParams::SHOW_WINDOW_INACTIVE;
     fullscreen_controller->FullscreenTabOpeningPopup(source,
                                                      new_contents.get());

@@ -88,6 +88,7 @@
 #include "content/browser/permissions/permission_controller_impl.h"
 #include "content/browser/permissions/permission_service_context.h"
 #include "content/browser/portal/portal.h"
+#include "content/browser/preloading/prerender/prerender_final_status.h"
 #include "content/browser/preloading/prerender/prerender_host_registry.h"
 #include "content/browser/preloading/prerender/prerender_metrics.h"
 #include "content/browser/presentation/presentation_service_impl.h"
@@ -201,6 +202,7 @@
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "mojo/public/cpp/bindings/struct_ptr.h"
 #include "mojo/public/cpp/system/data_pipe.h"
+#include "net/base/features.h"
 #include "net/base/schemeful_site.h"
 #include "net/net_buildflags.h"
 #include "services/device/public/mojom/screen_orientation.mojom.h"
@@ -216,6 +218,7 @@
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "services/network/public/mojom/web_sandbox_flags.mojom-shared.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
+#include "storage/browser/blob/blob_url_store_impl.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_registry.h"
 #include "third_party/blink/public/common/chrome_debug_urls.h"
@@ -1154,14 +1157,14 @@ bool IsAvoidUnnecessaryBeforeUnloadCheckPostTaskEnabled() {
          !IsAvoidUnnecessaryBeforeUnloadCheckSyncEnabled();
 }
 
-// Returns true if `host` has the Window Placement permission granted.
-bool IsWindowPlacementGranted(RenderFrameHost* host) {
+// Returns true if `host` has the Window Management permission granted.
+bool IsWindowManagementGranted(RenderFrameHost* host) {
   content::PermissionController* permission_controller =
       host->GetBrowserContext()->GetPermissionController();
   DCHECK(permission_controller);
 
   return permission_controller->GetPermissionStatusForCurrentDocument(
-             blink::PermissionType::WINDOW_PLACEMENT, host) ==
+             blink::PermissionType::WINDOW_MANAGEMENT, host) ==
          blink::mojom::PermissionStatus::GRANTED;
 }
 
@@ -3222,7 +3225,7 @@ void RenderFrameHostImpl::InitializePolicyContainerHost(
     // See also https://crbug.com/1191161.
     //
     // We also exclude prerendering from this case manually, since prendering
-    // render frame hosts are unconditionally created with the
+    // RenderFrameHosts are unconditionally created with the
     // `renderer_initiated_creation_of_main_frame` set to false, even though the
     // frames arguably are renderer-created.
     //
@@ -3297,8 +3300,8 @@ void RenderFrameHostImpl::RenderProcessGone(
   }
 
   CancelPrerendering(info.status == base::TERMINATION_STATUS_PROCESS_CRASHED
-                         ? PrerenderHost::FinalStatus::kRendererProcessCrashed
-                         : PrerenderHost::FinalStatus::kRendererProcessKilled);
+                         ? PrerenderFinalStatus::kRendererProcessCrashed
+                         : PrerenderFinalStatus::kRendererProcessKilled);
 
   if (owned_render_widget_host_)
     owned_render_widget_host_->RendererExited();
@@ -4544,7 +4547,7 @@ void RenderFrameHostImpl::DidFailLoadWithError(const GURL& url,
   // a case as the embedders are unaware of prerender page yet and shouldn't
   // show any user-visible changes from an inactive RenderFrameHost.
   if (!GetParentOrOuterDocument() &&
-      CancelPrerendering(PrerenderHost::FinalStatus::kDidFailLoad)) {
+      CancelPrerendering(PrerenderFinalStatus::kDidFailLoad)) {
     return;
   }
 
@@ -5550,12 +5553,12 @@ void RenderFrameHostImpl::TakeFocus(bool reverse) {
 void RenderFrameHostImpl::UpdateTargetURL(
     const GURL& url,
     blink::mojom::LocalMainFrameHost::UpdateTargetURLCallback callback) {
-  // Prerendering pages should not reach this code since the renderer only calls
-  // this when the mouse over the URL or keyboard focuses the URL.
-  if (lifecycle_state_ == LifecycleStateImpl::kPrerendering) {
-    mojo::ReportBadMessage("Unexpected UpdateTargetURL from renderer");
+  // An inactive document should ignore to update the target url.
+  if (!IsActive()) {
+    std::move(callback).Run();
     return;
   }
+
   delegate_->UpdateTargetURL(this, url);
   std::move(callback).Run();
 }
@@ -5621,7 +5624,7 @@ void RenderFrameHostImpl::DownloadURL(
   // TODO(crbug.com/1205359): We should defer the download until the
   // prerendering page is activated, and it will comply with the prerendering
   // spec.
-  if (CancelPrerendering(PrerenderHost::FinalStatus::kDownload)) {
+  if (CancelPrerendering(PrerenderFinalStatus::kDownload)) {
     return;
   }
 
@@ -6541,7 +6544,7 @@ bool RenderFrameHostImpl::IsInactiveAndDisallowActivation(uint64_t reason) {
       return true;
     case LifecycleStateImpl::kPrerendering:
       RecordPrerenderReasonForInactivePageRestriction(reason, *this);
-      CancelPrerendering(PrerenderHost::FinalStatus::kInactivePageRestriction);
+      CancelPrerendering(PrerenderFinalStatus::kInactivePageRestriction);
       return true;
     case LifecycleStateImpl::kSpeculative:
       // We do not expect speculative or pending commit RenderFrameHosts to
@@ -6719,7 +6722,7 @@ void RenderFrameHostImpl::EnterFullscreen(
   // CanEnterFullscreenWithoutUserActivation is only ever true in tests, to
   // allow fullscreen when mocking screen orientation changes.
   if (!delegate_->HasSeenRecentScreenOrientationChange() &&
-      !WindowPlacementAllowsFullscreen() && !HasSeenRecentXrOverlaySetup() &&
+      !WindowManagementAllowsFullscreen() && !HasSeenRecentXrOverlaySetup() &&
       !GetContentClient()
            ->browser()
            ->CanEnterFullscreenWithoutUserActivation()) {
@@ -6754,11 +6757,9 @@ void RenderFrameHostImpl::EnterFullscreen(
   // This enables multi-screen content experiences from a single user gesture.
   const display::Screen* screen = display::Screen::GetScreen();
   display::Display display;
-  if (base::FeatureList::IsEnabled(
-          blink::features::kWindowPlacementFullscreenCompanionWindow) &&
-      screen && screen->GetNumDisplays() > 1 &&
+  if (screen && screen->GetNumDisplays() > 1 &&
       screen->GetDisplayWithDisplayId(options->display_id, &display) &&
-      IsWindowPlacementGranted(this)) {
+      IsWindowManagementGranted(this)) {
     transient_allow_popup_.Activate();
   }
 
@@ -7945,7 +7946,7 @@ void RenderFrameHostImpl::DidChangeSrcDoc(
 }
 
 void RenderFrameHostImpl::DidChangeBaseURL(const GURL& base_url) {
-  if (!SiteIsolationPolicy::AreIsolatedSandboxedIframesEnabled())
+  if (!blink::features::IsNewBaseUrlInheritanceBehaviorEnabled())
     return;
 
   // TODO(https://crbug.com/1356658,1366593): consider restricting base URL in
@@ -7954,10 +7955,10 @@ void RenderFrameHostImpl::DidChangeBaseURL(const GURL& base_url) {
 }
 
 const GURL& RenderFrameHostImpl::GetBaseUrl() const {
-  if (!SiteIsolationPolicy::AreIsolatedSandboxedIframesEnabled()) {
+  if (!blink::features::IsNewBaseUrlInheritanceBehaviorEnabled()) {
     NOTREACHED() << __func__
                  << " should only be invoked when the feature "
-                    "IsolateSandboxedIframes is enabled.";
+                    "NewBaseUrlInheritanceBehavioris enabled.";
     return GURL::EmptyGURL();
   }
 
@@ -8879,24 +8880,6 @@ void RenderFrameHostImpl::OnUnloadTimeout() {
   parent_->RemoveChild(frame_tree_node_);
 }
 
-void RenderFrameHostImpl::UpdateOpener() {
-  TRACE_EVENT1("navigation", "RenderFrameHostImpl::UpdateOpener",
-               "render_frame_host", this);
-
-  // This frame (the frame whose opener is being updated) might not have had
-  // proxies for the new opener chain in its SiteInstance.  Make sure they
-  // exist.
-  if (frame_tree_node_->opener()) {
-    frame_tree_node_->opener()->render_manager()->CreateOpenerProxies(
-        GetSiteInstance(), frame_tree_node_, browsing_context_state_);
-  }
-
-  auto opener_frame_token =
-      frame_tree_node_->render_manager()->GetOpenerFrameToken(
-          GetSiteInstance()->group());
-  GetAssociatedLocalFrame()->UpdateOpener(opener_frame_token);
-}
-
 void RenderFrameHostImpl::SetFocusedFrame() {
   GetAssociatedLocalFrame()->Focus();
 }
@@ -9259,6 +9242,11 @@ void RenderFrameHostImpl::CommitNavigation(
             &non_network_factories);
 
     for (auto& factory : non_network_factories) {
+      // TODO(https://crbug.com/1376879): Remove the ad-hoc debugging code after
+      // the bug is understood and/or fixed.
+      const std::string& scheme = factory.first;
+      SCOPED_CRASH_KEY_STRING32("non_network_factories", "scheme", scheme);
+
       mojo::PendingRemote<network::mojom::URLLoaderFactory>
           pending_factory_proxy;
       mojo::PendingReceiver<network::mojom::URLLoaderFactory> factory_receiver =
@@ -9270,7 +9258,7 @@ void RenderFrameHostImpl::CommitNavigation(
           std::move(factory.second));
       remote->Clone(std::move(factory_receiver));
       subresource_loader_factories->pending_scheme_specific_factories().emplace(
-          factory.first, std::move(pending_factory_proxy));
+          scheme, std::move(pending_factory_proxy));
     }
 
     subresource_loader_factories->pending_isolated_world_factories() =
@@ -9488,18 +9476,6 @@ void RenderFrameHostImpl::FailedNavigation(
 void RenderFrameHostImpl::HandleRendererDebugURL(const GURL& url) {
   DCHECK(blink::IsRendererDebugURL(url));
 
-  // Several tests expect a load of Chrome Debug URLs to send a DidStopLoading
-  // notification, so set is loading to true here to properly surface it when
-  // the renderer process is done handling the URL.
-  // TODO(crbug.com/1254130): Remove the test dependency on this behavior.
-  if (!url.SchemeIs(url::kJavaScriptScheme)) {
-    bool was_loading =
-        frame_tree()->LoadingTree()->IsLoadingIncludingInnerFrameTrees();
-    is_loading_ = true;
-    frame_tree_node()->DidStartLoading(true /* should_show_loading_ui */,
-                                       was_loading);
-  }
-
   GetAssociatedLocalFrame()->HandleRendererDebugURL(url);
 
   // Ensure that the renderer process is marked as used after processing a
@@ -9523,6 +9499,26 @@ void RenderFrameHostImpl::CreateBroadcastChannelProvider(
       std::make_unique<BroadcastChannelProvider>(broadcast_channel_service,
                                                  storage_key()),
       std::move(receiver));
+}
+
+void RenderFrameHostImpl::BindBlobUrlStoreAssociatedReceiver(
+    mojo::PendingAssociatedReceiver<blink::mojom::BlobURLStore> receiver) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  auto* storage_partition_impl =
+      static_cast<StoragePartitionImpl*>(GetStoragePartition());
+
+  storage_partition_impl->GetBlobUrlRegistry()->AddReceiver(
+      storage_key(), std::move(receiver));
+}
+
+void RenderFrameHostImpl::BindBlobUrlStoreReceiver(
+    mojo::PendingReceiver<blink::mojom::BlobURLStore> receiver) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  auto* storage_partition_impl =
+      static_cast<StoragePartitionImpl*>(GetStoragePartition());
+
+  storage_partition_impl->GetBlobUrlRegistry()->AddReceiver(
+      storage_key(), std::move(receiver));
 }
 
 void RenderFrameHostImpl::SetUpMojoConnection() {
@@ -9692,6 +9688,13 @@ void RenderFrameHostImpl::SetUpMojoConnection() {
   associated_registry_->AddInterface<blink::mojom::BroadcastChannelProvider>(
       base::BindRepeating(&RenderFrameHostImpl::CreateBroadcastChannelProvider,
                           base::Unretained(this)));
+
+  if (base::FeatureList::IsEnabled(net::features::kSupportPartitionedBlobUrl)) {
+    associated_registry_->AddInterface<blink::mojom::BlobURLStore>(
+        base::BindRepeating(
+            &RenderFrameHostImpl::BindBlobUrlStoreAssociatedReceiver,
+            base::Unretained(this)));
+  }
 
   // Allow embedders to register their binders.
   GetContentClient()
@@ -10266,8 +10269,8 @@ void RenderFrameHostImpl::UpdatePermissionsForNavigation(
     GrantFileAccessFromResourceRequestBody(*request->common_params().post_data);
 }
 
-bool RenderFrameHostImpl::WindowPlacementAllowsFullscreen() {
-  return IsWindowPlacementGranted(this) &&
+bool RenderFrameHostImpl::WindowManagementAllowsFullscreen() {
+  return IsWindowManagementGranted(this) &&
          delegate_->IsTransientAllowFullscreenActive();
 }
 
@@ -10684,7 +10687,7 @@ void RenderFrameHostImpl::CreateAudioOutputStreamFactory(
         base::BindOnce(
             base::IgnoreResult(&RenderFrameHostImpl::CancelPrerendering),
             base::Unretained(this),
-            PrerenderHost::FinalStatus::kAudioOutputDeviceRequested));
+            PrerenderFinalStatus::kAudioOutputDeviceRequested));
   } else {
     audio_service_audio_output_stream_factory_.emplace(
         this, audio_system, media_stream_manager, std::move(receiver),
@@ -10735,8 +10738,7 @@ void RenderFrameHostImpl::BindRenderAccessibilityHost(
       .WithArgs(std::move(receiver));
 }
 
-bool RenderFrameHostImpl::CancelPrerendering(
-    PrerenderHost::FinalStatus status) {
+bool RenderFrameHostImpl::CancelPrerendering(PrerenderFinalStatus status) {
   if (!blink::features::IsPrerender2Enabled())
     return false;
   // A prerendered page is identified by its root FrameTreeNode id, so if this
@@ -10776,8 +10778,7 @@ void RenderFrameHostImpl::CancelPrerenderingByMojoBinderPolicy(
       interface_name, prerender_host->trigger_type(),
       prerender_host->embedder_histogram_suffix());
 
-  bool canceled =
-      CancelPrerendering(PrerenderHost::FinalStatus::kMojoBinderPolicy);
+  bool canceled = CancelPrerendering(PrerenderFinalStatus::kMojoBinderPolicy);
   // This function is called from MojoBinderPolicyApplier, which should only be
   // active during prerendering. It would be an error to call this while not
   // prerendering, as it could mean an interface request is never resolved for
@@ -10794,7 +10795,7 @@ void RenderFrameHostImpl::CancelPrerenderingByMojoBinderPolicy(
   if (prerender_initiator_frame) {
     devtools_instrumentation::DidCancelPrerender(
         prerender_host->prerendering_url(), prerender_initiator_frame,
-        PrerenderHost::FinalStatus::kMojoBinderPolicy, interface_name);
+        PrerenderFinalStatus::kMojoBinderPolicy, interface_name);
   }
 }
 
@@ -11421,7 +11422,7 @@ bool RenderFrameHostImpl::ShouldBypassSecurityChecksForErrorPage(
   if (should_commit_error_page)
     *should_commit_error_page = false;
 
-  if (frame_tree_node_->IsErrorPageIsolationEnabled()) {
+  if (SiteIsolationPolicy::IsErrorPageIsolationEnabled(is_main_frame())) {
     if (GetSiteInstance()->GetSiteInfo().is_error_page()) {
       if (should_commit_error_page)
         *should_commit_error_page = true;
@@ -11805,7 +11806,8 @@ void RenderFrameHost::LogSandboxedIframesIsolationMetrics() {
       sandboxed_rphs.size());
 }
 
-void RenderFrameHostImpl::UpdateIsolatableSandboxedIframeTracking() {
+void RenderFrameHostImpl::UpdateIsolatableSandboxedIframeTracking(
+    NavigationRequest* navigation_request) {
   RoutingIDIsolatableSandboxedIframesSet* oopsifs =
       g_routing_id_isolatable_sandboxed_iframes_set.Pointer();
   GlobalRenderFrameHostId global_id = GetGlobalId();
@@ -11828,8 +11830,9 @@ void RenderFrameHostImpl::UpdateIsolatableSandboxedIframeTracking() {
       // frame, to see if the url can be placed in an OOPSIF, i.e. it's not
       // already isolated because of being cross-site.
       RenderFrameHost* frame_owner = GetParent();
-      if (!frame_owner && frame_tree_node_->opener())
-        frame_owner = frame_tree_node_->opener()->current_frame_host();
+      FrameTreeNode* opener = navigation_request->frame_tree_node()->opener();
+      if (!frame_owner && opener)
+        frame_owner = opener->current_frame_host();
 
       if (!frame_owner) {
         frame_is_isolatable = false;
@@ -12251,7 +12254,7 @@ void RenderFrameHostImpl::DidCommitNewDocument(
 
   accessibility_fatal_error_count_ = 0;
 
-  UpdateIsolatableSandboxedIframeTracking();
+  UpdateIsolatableSandboxedIframeTracking(navigation_request);
 }
 
 // TODO(arthursonzogni): Below, many NavigationRequest's objects are passed from
@@ -12667,8 +12670,8 @@ void RenderFrameHostImpl::DidCommitNavigation(
   ScopedCommitStateResetter commit_state_resetter(this);
   RenderProcessHost* process = GetProcess();
 
-  TRACE_EVENT2("navigation", "RenderFrameHostImpl::DidCommitProvisionalLoad",
-               "rfh", this, "params", params);
+  TRACE_EVENT("navigation", "RenderFrameHostImpl::DidCommitProvisionalLoad",
+              ChromeTrackEvent::kRenderFrameHost, this, "params", params);
 
   // If we're waiting for a cross-site beforeunload completion callback from
   // this renderer and we receive a Navigate message from the main frame, then

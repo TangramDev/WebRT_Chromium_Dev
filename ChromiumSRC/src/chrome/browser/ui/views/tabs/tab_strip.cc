@@ -51,6 +51,7 @@
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/tabs/browser_tab_strip_controller.h"
+#include "chrome/browser/ui/views/tabs/compound_tab_container.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_container_impl.h"
 #include "chrome/browser/ui/views/tabs/tab_drag_controller.h"
@@ -74,7 +75,6 @@
 #include "components/tab_groups/tab_group_color.h"
 #include "components/tab_groups/tab_group_id.h"
 #include "components/tab_groups/tab_group_visual_data.h"
-#include "compound_tab_container.h"
 #include "third_party/skia/include/core/SkColorFilter.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/pathops/SkPathOps.h"
@@ -703,7 +703,7 @@ class TabStrip::TabDragContextImpl : public TabDragContext,
 
    private:
     const raw_ref<TabContainer> tab_container_;
-    const raw_ref<TabSlotView> slot_view_;
+    const raw_ref<TabSlotView, DanglingUntriaged> slot_view_;
   };
 
   // Determines the index to move the dragged tabs to. The dragged tabs must
@@ -868,7 +868,7 @@ class TabStrip::TabDragContextImpl : public TabDragContext,
     return 0;
   }
 
-  const raw_ptr<TabStrip> tab_strip_;
+  const raw_ptr<TabStrip, DanglingUntriaged> tab_strip_;
 
   // Responsible for animating tabs during drag sessions.
   views::BoundsAnimator bounds_animator_;

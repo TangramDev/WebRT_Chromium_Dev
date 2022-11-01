@@ -4,7 +4,6 @@
 
 #include "content/renderer/render_frame_impl.h"
 
-#include <algorithm>
 #include <map>
 #include <memory>
 #include <string>
@@ -34,6 +33,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/observer_list.h"
 #include "base/process/process.h"
+#include "base/ranges/algorithm.h"
 #include "base/run_loop.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_piece.h"
@@ -743,8 +743,7 @@ class MHTMLPartsGenerationDelegate
     DCHECK(std::is_sorted(params_.digests_of_uris_to_skip.begin(),
                           params_.digests_of_uris_to_skip.end()));
     // URLs are not duplicated.
-    DCHECK(std::adjacent_find(params_.digests_of_uris_to_skip.begin(),
-                              params_.digests_of_uris_to_skip.end()) ==
+    DCHECK(base::ranges::adjacent_find(params_.digests_of_uris_to_skip) ==
            params_.digests_of_uris_to_skip.end());
   }
 
@@ -1521,7 +1520,6 @@ RenderFrameImpl* RenderFrameImpl::CreateMainFrame(
       is_for_nested_main_frame, is_for_scalable_page,
       /*hidden=*/true);
   web_frame_widget->InitializeCompositing(
-      agent_scheduling_group.agent_group_scheduler(),
       params->widget_params->visual_properties.screen_infos,
       /*settings=*/nullptr);
 
@@ -1713,7 +1711,6 @@ void RenderFrameImpl::CreateFrame(
         /*is_for_scalable_page=*/!is_for_nested_main_frame,
         /*hidden=*/true);
     web_frame_widget->InitializeCompositing(
-        agent_scheduling_group.agent_group_scheduler(),
         widget_params->visual_properties.screen_infos,
         /*settings=*/nullptr);
 
@@ -1756,7 +1753,6 @@ void RenderFrameImpl::CreateFrame(
         /*is_for_scalable_page=*/false,
         /*hidden=*/true);
     web_frame_widget->InitializeCompositing(
-        agent_scheduling_group.agent_group_scheduler(),
         widget_params->visual_properties.screen_infos,
         /*settings=*/nullptr);
 
@@ -3848,9 +3844,6 @@ void RenderFrameImpl::DidCommitDocumentReplacementNavigation(
 }
 
 void RenderFrameImpl::DidClearWindowObject() {
-  v8::MicrotasksScope microtasks(blink::MainThreadIsolate(),
-                                 v8::MicrotasksScope::kDoNotRunMicrotasks);
-
   if (enabled_bindings_ & BINDINGS_POLICY_WEB_UI)
     WebUIExtension::Install(frame_);
 
@@ -4368,6 +4361,7 @@ void RenderFrameImpl::DidObserveLayoutNg(uint32_t all_block_count,
 void RenderFrameImpl::DidCreateScriptContext(v8::Local<v8::Context> context,
                                              int world_id) {
   v8::MicrotasksScope microtasks(blink::MainThreadIsolate(),
+                                 context->GetMicrotaskQueue(),
                                  v8::MicrotasksScope::kDoNotRunMicrotasks);
   if (((enabled_bindings_ & BINDINGS_POLICY_MOJO_WEB_UI) ||
        enable_mojo_js_bindings_) &&
@@ -5290,7 +5284,11 @@ void RenderFrameImpl::SynchronouslyCommitAboutBlankForBug778318(
   // https://html.spec.whatwg.org/multipage/browsers.html#creating-a-new-browsing-context,
   // which sets the new Document's `referrer` member to the initiator frame's
   // full unredacted URL, in the case of new browsing context creation.
-  if (info->initiator_frame_token.has_value()) {
+  //
+  // The initiator might no longer exist however, in which case we cannot get
+  // its document's full URL to use as the referrer.
+  if (info->initiator_frame_token.has_value() &&
+      WebFrame::FromFrameToken(info->initiator_frame_token.value())) {
     WebFrame* initiator =
         WebFrame::FromFrameToken(info->initiator_frame_token.value());
     DCHECK(initiator->IsWebLocalFrame());

@@ -2050,7 +2050,7 @@ void RenderProcessHostImpl::BindQuotaManagerHost(
     mojo::PendingReceiver<blink::mojom::QuotaManagerHost> receiver) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   storage_partition_impl_->GetQuotaContext()->BindQuotaManagerHost(
-      GetID(), MSG_ROUTING_NONE, storage_key, std::move(receiver));
+      storage_key, std::move(receiver));
 }
 
 void RenderProcessHostImpl::CreateLockManager(
@@ -3125,9 +3125,14 @@ void RenderProcessHostImpl::NotifyRendererOfLockedStateUpdate() {
       GetContentClient()->browser()->IsIsolatedAppsDeveloperModeAllowed(
           GetBrowserContext());
 
-  GetRendererInterface()->SetIsIsolatedApplication(
-      isolated_apps_developer_mode_allowed &&
-      process_lock.GetWebExposedIsolationInfo().is_isolated_application());
+  bool is_isolated_context_allowed_by_embedder =
+      GetContentClient()->browser()->IsIsolatedContextAllowedForUrl(
+          GetBrowserContext(), process_lock.lock_url());
+
+  GetRendererInterface()->SetIsIsolatedContext(
+      (isolated_apps_developer_mode_allowed &&
+       process_lock.GetWebExposedIsolationInfo().is_isolated_application()) ||
+      is_isolated_context_allowed_by_embedder);
 
   if (!process_lock.IsASiteOrOrigin())
     return;
