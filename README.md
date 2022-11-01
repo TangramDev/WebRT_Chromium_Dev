@@ -85,11 +85,11 @@ as shown in the following figure:</p>
 
 <p>execute the following command:
 
-	$ ..\getbranch 5359.a WebRTBase
+	$ ..\getbranch 53ab.c WebRTBase
 </p>
 <p>
 	
-Here, "<ins>108.0.5359.a</ins>" is the Tag value contained in <i>[ChromiumVer.txt](https://github.com/TangramDev/WebRT_Chromium_Dev/blob/main/ChromiumVer.txt)</i>, and WebRTBase is the branch name of "WebRT Base Branch"</p>
+Here, "<ins>109.0.53ab.c</ins>" is the Tag value contained in <i>[ChromiumVer.txt](https://github.com/TangramDev/WebRT_Chromium_Canary/blob/main/ChromiumVer.txt)</i>, and WebRTBase is the branch name of "WebRT Base Branch"</p>
 
 <p>Copy the folder "ChromiumSRC\src" (this folder is included in the unzipped folder of Chromium WebRT Patch) to "d:\WebRT\M108\src", execute the following command:
 	
@@ -100,13 +100,13 @@ Here, "<ins>108.0.5359.a</ins>" is the Tag value contained in <i>[ChromiumVer.tx
 
 <h1 align=center>
 
-WebRuntime based on<br/> a <i>Specific Chromium Project Dev Version: 108.0.5359.x</i>
+WebRuntime based on <br/>a <i>Specific Chromium Project Canary Version: 109.0.53xy.z</i>
 </h1>
 <h2>
 <p>Execute the following command:
 	
-	$ ..\getWebRTbranch x your_branch_name WebRTBase
-Here, WebRTBase is the source code branch that supports WebRuntime created in the above steps, and a, b and c is are integers, you will obtain a branch with webruntime support you expected.
+	$ ..\getWebRTbranch 53xy.z your_branch_name WebRTBase
+Here, WebRTBase is the source code branch that supports WebRuntime created in the above steps, and x,y and z are are integers, you will obtain a branch with webruntime support you expected.
 </p>
 </h2>
 
@@ -127,6 +127,13 @@ Normally, you need to delete the default subfolder of the out folder
 Compiling <i>Chromium with WebRuntime Support</i>
 </h1>
 <h2>
+<p>Execute the following command:
+	
+	$ ..\bd tasknumber
+Normally, tasknumber=2*cpucorenumber+2.
+</p>
+</h2>
+
 <p>Execute the following command:
 	
 	$ ..\bd tasknumber
