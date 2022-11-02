@@ -2094,25 +2094,30 @@ void RenderProcessHostImpl::CreatePaymentManagerForOrigin(
 }
 
 void RenderProcessHostImpl::CreateNotificationService(
-    int render_frame_id,
+    RenderFrameHost* rfh,
+    const RenderProcessHost::NotificationServiceCreatorType creator_type,
     const url::Origin& origin,
     mojo::PendingReceiver<blink::mojom::NotificationService> receiver) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  auto weak_document_ptr = rfh ? rfh->GetWeakDocumentPtr() : WeakDocumentPtr();
+  switch (creator_type) {
+    case RenderProcessHost::NotificationServiceCreatorType::kServiceWorker:
+    case RenderProcessHost::NotificationServiceCreatorType::kSharedWorker:
+    case RenderProcessHost::NotificationServiceCreatorType::kDedicatedWorker: {
+      storage_partition_impl_->GetPlatformNotificationContext()->CreateService(
+          this, origin, /*document_url=*/GURL(), weak_document_ptr,
+          creator_type, std::move(receiver));
+      break;
+    }
+    case RenderProcessHost::NotificationServiceCreatorType::kDocument: {
+      CHECK(rfh);
 
-  // For workers:
-  if (render_frame_id == MSG_ROUTING_NONE) {
-    storage_partition_impl_->GetPlatformNotificationContext()->CreateService(
-        this, origin, /*document_url=*/GURL(),
-        /*weak_document_ptr=*/WeakDocumentPtr(), std::move(receiver));
-    return;
+      storage_partition_impl_->GetPlatformNotificationContext()->CreateService(
+          this, origin, rfh->GetLastCommittedURL(), weak_document_ptr,
+          creator_type, std::move(receiver));
+      break;
+    }
   }
-
-  // For document:
-  RenderFrameHost* rfh = RenderFrameHost::FromID(GetID(), render_frame_id);
-  CHECK(rfh);
-  storage_partition_impl_->GetPlatformNotificationContext()->CreateService(
-      this, origin, rfh->GetLastCommittedURL(), rfh->GetWeakDocumentPtr(),
-      std::move(receiver));
 }
 
 void RenderProcessHostImpl::CreateWebSocketConnector(
@@ -3122,7 +3127,7 @@ void RenderProcessHostImpl::NotifyRendererOfLockedStateUpdate() {
       process_lock.GetWebExposedIsolationInfo().is_isolated());
 
   bool isolated_apps_developer_mode_allowed =
-      GetContentClient()->browser()->IsIsolatedAppsDeveloperModeAllowed(
+      GetContentClient()->browser()->IsIsolatedWebAppsDeveloperModeAllowed(
           GetBrowserContext());
 
   bool is_isolated_context_allowed_by_embedder =

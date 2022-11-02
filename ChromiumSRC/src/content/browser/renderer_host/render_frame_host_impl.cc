@@ -553,8 +553,8 @@ class BackForwardCacheMessageFilter : public mojo::MessageFilter {
       return true;
     }
 
-    DLOG(ERROR) << "Received message " << message->name() << " on interface "
-                << interface_name_ << " from frame in bfcache.";
+    BackForwardCacheImpl::VlogUnexpectedRendererToBrowserMessage(
+        interface_name_, message->name());
 
     TRACE_EVENT2(
         "content", "BackForwardCacheMessageFilter::WillDispatch bad_message",
@@ -2176,7 +2176,7 @@ void RenderFrameHostImpl::StartBackForwardCacheEvictionTimer() {
       BackForwardCacheImpl::GetTimeToLiveInBackForwardCache();
 
   back_forward_cache_eviction_timer_.SetTaskRunner(
-      frame_tree()->controller().GetBackForwardCache().GetTaskRunner());
+      GetBackForwardCache().GetTaskRunner());
 
   back_forward_cache_eviction_timer_.Start(
       FROM_HERE, evict_after,
@@ -6622,17 +6622,12 @@ void RenderFrameHostImpl::EvictFromBackForwardCacheWithFlattenedAndTreeReasons(
               can_store.flattened_reasons);
   DCHECK(IsBackForwardCacheEnabled());
 
-  if (is_evicted_from_back_forward_cache_)
+  RenderFrameHostImpl* top_document = GetOutermostMainFrame();
+
+  if (top_document->is_evicted_from_back_forward_cache_)
     return;
 
   bool in_back_forward_cache = IsInBackForwardCache();
-
-  RenderFrameHostImpl* top_document = this;
-  while (RenderFrameHostImpl* parent =
-             top_document->GetParentOrOuterDocument()) {
-    top_document = parent;
-    DCHECK_EQ(top_document->IsInBackForwardCache(), in_back_forward_cache);
-  }
 
   // TODO(hajimehoshi): Record the 'race condition' by JavaScript execution when
   // |in_back_forward_cache| is false.
@@ -6685,10 +6680,7 @@ void RenderFrameHostImpl::EvictFromBackForwardCacheWithFlattenedAndTreeReasons(
   // immediately, but destruction is delayed, so that callers don't have to
   // worry about use-after-free of |this|.
   top_document->is_evicted_from_back_forward_cache_ = true;
-  top_document->frame_tree()
-      ->controller()
-      .GetBackForwardCache()
-      .PostTaskToDestroyEvictedFrames();
+  GetBackForwardCache().PostTaskToDestroyEvictedFrames();
 }
 
 void RenderFrameHostImpl::
@@ -9376,10 +9368,12 @@ void RenderFrameHostImpl::CommitNavigation(
 
     absl::optional<blink::ParsedPermissionsPolicy> manifest_policy;
     if (!parent_frame_host && isolation_info.is_isolated_application()) {
-      if (auto isolated_app_permissions_policy =
-              GetContentClient()->browser()->GetPermissionsPolicyForIsolatedApp(
-                  GetBrowserContext(), isolation_info.origin())) {
-        manifest_policy = std::move(isolated_app_permissions_policy);
+      if (auto isolated_web_app_permissions_policy =
+              GetContentClient()
+                  ->browser()
+                  ->GetPermissionsPolicyForIsolatedWebApp(
+                      GetBrowserContext(), isolation_info.origin())) {
+        manifest_policy = std::move(isolated_web_app_permissions_policy);
       }
     }
 
@@ -10639,11 +10633,13 @@ void RenderFrameHostImpl::ResetPermissionsPolicy() {
   if (!parent_frame_host && isolation_info.is_isolated_application()) {
     // In Isolated Apps, the top level frame should use the policy declared in
     // the Web App Manifest.
-    if (auto isolated_app_permissions_policy =
-            GetContentClient()->browser()->GetPermissionsPolicyForIsolatedApp(
-                GetBrowserContext(), isolation_info.origin())) {
+    if (auto isolated_web_app_permissions_policy =
+            GetContentClient()
+                ->browser()
+                ->GetPermissionsPolicyForIsolatedWebApp(
+                    GetBrowserContext(), isolation_info.origin())) {
       permissions_policy_ = blink::PermissionsPolicy::CreateFromParsedPolicy(
-          *isolated_app_permissions_policy, last_committed_origin_);
+          *isolated_web_app_permissions_policy, last_committed_origin_);
       return;
     }
   }
@@ -10896,7 +10892,8 @@ void RenderFrameHostImpl::CreateWebTransportConnector(
 void RenderFrameHostImpl::CreateNotificationService(
     mojo::PendingReceiver<blink::mojom::NotificationService> receiver) {
   GetProcess()->CreateNotificationService(
-      GetRoutingID(), GetLastCommittedOrigin(), std::move(receiver));
+      this, RenderProcessHost::NotificationServiceCreatorType::kDocument,
+      GetLastCommittedOrigin(), std::move(receiver));
 }
 
 void RenderFrameHostImpl::CreateInstalledAppProvider(
@@ -13771,16 +13768,21 @@ void RenderFrameHostImpl::
   }
 }
 
+BackForwardCacheImpl& RenderFrameHostImpl::GetBackForwardCache() {
+  return GetOutermostMainFrame()
+      ->frame_tree()
+      ->controller()
+      .GetBackForwardCache();
+}
+
 void RenderFrameHostImpl::MaybeEvictFromBackForwardCache() {
   if (!IsInBackForwardCache())
     return;
 
   RenderFrameHostImpl* outermost_main_frame = GetOutermostMainFrame();
   BackForwardCacheCanStoreDocumentResultWithTree bfcache_eligibility =
-      outermost_main_frame->frame_tree()
-          ->controller()
-          .GetBackForwardCache()
-          .GetCurrentBackForwardCacheEligibility(outermost_main_frame);
+      GetBackForwardCache().GetCurrentBackForwardCacheEligibility(
+          outermost_main_frame);
 
   TRACE_EVENT("navigation",
               "RenderFrameHostImpl::MaybeEvictFromBackForwardCache",
