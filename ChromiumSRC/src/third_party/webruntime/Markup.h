@@ -235,7 +235,6 @@ class CMarkup {
     MNF_ESCAPEQUOTES = 0x100,
     MNF_NONENDED = 0x100000,
     MNF_ILLDATA = 0x200000,
-    MNF_REPLACE_ = 0x001000,
   };
   enum MarkupNodeType {
     MNT_ELEMENT = 1,                  // 0x01

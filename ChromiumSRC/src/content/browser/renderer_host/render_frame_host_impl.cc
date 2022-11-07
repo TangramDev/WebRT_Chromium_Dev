@@ -10896,7 +10896,8 @@ void RenderFrameHostImpl::CreateWebTransportConnector(
 void RenderFrameHostImpl::CreateNotificationService(
     mojo::PendingReceiver<blink::mojom::NotificationService> receiver) {
   GetProcess()->CreateNotificationService(
-      this, RenderProcessHost::NotificationServiceCreatorType::kDocument,
+      GetGlobalId(),
+      RenderProcessHost::NotificationServiceCreatorType::kDocument,
       GetLastCommittedOrigin(), std::move(receiver));
 }
 
@@ -11601,9 +11602,8 @@ bool RenderFrameHostImpl::ValidateDidCommitParams(
 
   // If a frame claims the navigation was same-document, it must be the current
   // frame, not a pending one.
-  base::WeakPtr<RenderFrameHostImpl> old_frame_host =
-      frame_tree_node_->render_manager()->current_frame_host()->GetWeakPtr();
-  if (is_same_document_navigation && this != old_frame_host.get()) {
+  if (is_same_document_navigation &&
+      lifecycle_state() == LifecycleStateImpl::kPendingCommit) {
     bad_message::ReceivedBadMessage(process,
                                     bad_message::NI_IN_PAGE_NAVIGATION);
     return false;
