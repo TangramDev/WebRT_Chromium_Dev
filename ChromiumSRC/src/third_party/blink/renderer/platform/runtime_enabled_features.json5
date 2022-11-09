@@ -473,7 +473,7 @@
     },
     {
       name: "CaptureController",
-      status: {"Android": "", "default": "experimental"},
+      status: {"Android": "", "default": "stable"},
     },
     {
       name: "CaptureHandle",
@@ -565,8 +565,8 @@
     },
     {
       name: "ConditionalFocus",
-      origin_trial_feature_name: "ConditionalFocus",
-      status: {"Android": "", "default": "experimental"},
+      depends_on: ["CaptureController"],
+      status: {"Android": "", "default": "stable"},
     },
     {
       name: "ConfirmationOfAction",
@@ -1012,11 +1012,6 @@
       name: "DevicePosture",
       public: true,
       status: "experimental",
-    },
-    {
-      name: "DialogNewFocusBehavior",
-      status: "experimental",
-      base_feature: "DialogNewFocusBehavior",
     },
     {
       name: "DigitalGoods",
@@ -2926,7 +2921,7 @@
     },
     {
       name: "WebAppDarkMode",
-      origin_trial_feature_name: "WebAppDarkMode",
+      origin_trial_feature_name: "WebAppDarkModeV2",
       status: "experimental",
       base_feature: "WebAppEnableDarkMode",
     },

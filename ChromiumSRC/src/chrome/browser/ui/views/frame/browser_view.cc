@@ -25,6 +25,7 @@
 #include "base/metrics/user_metrics.h"
 #include "base/ranges/algorithm.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
@@ -505,6 +506,34 @@ void GetAnyTabAudioStates(const Browser* browser,
     }
   }
 }
+#endif  // BUILDFLAG(IS_MAC)
+
+#if BUILDFLAG(IS_MAC)
+// OverlayWidget is a child Widget of BrowserFrame used during immersive
+// fullscreen on macOS that hosts the top container. Its native Window and View
+// interface with macOS fullscreen APIs allowing separation of the top container
+// and web contents.
+// Currently the only explicit reason for OverlayWidget to be its own subclass
+// is to support GetAccelerator() forwarding.
+class OverlayWidget : public ThemeCopyingWidget {
+ public:
+  explicit OverlayWidget(views::Widget* role_model)
+      : ThemeCopyingWidget(role_model) {}
+
+  OverlayWidget(const OverlayWidget&) = delete;
+  OverlayWidget& operator=(const OverlayWidget&) = delete;
+
+  ~OverlayWidget() override = default;
+
+  // OverlayWidget hosts the top container. Views within the top container look
+  // up accelerators by asking their hosting Widget. In non-immersive fullscreen
+  // that would be the BrowserFrame. Give top chrome what it expects and forward
+  // GetAccelerator() calls to OverlayWidget's parent (BrowserFrame).
+  bool GetAccelerator(int cmd_id, ui::Accelerator* accelerator) const override {
+    DCHECK(parent());
+    return parent()->GetAccelerator(cmd_id, accelerator);
+  }
+};
 #endif  // BUILDFLAG(IS_MAC)
 
 }  // namespace
@@ -3529,7 +3558,7 @@ views::View* BrowserView::CreateMacOverlayView() {
   params.type = views::Widget::InitParams::TYPE_POPUP;
   params.child = true;
   params.parent = GetWidget()->GetNativeView();
-  overlay_widget_ = new ThemeCopyingWidget(GetWidget());
+  overlay_widget_ = new OverlayWidget(GetWidget());
   overlay_widget_->Init(std::move(params));
   overlay_widget_->SetNativeWindowProperty(kBrowserViewKey, this);
 
@@ -4001,7 +4030,7 @@ void BrowserView::AddedToWidget() {
   MaybeShowWebUITabStripIPH();
 
   // Want to show this promo, but not right at startup.
-  base::SequencedTaskRunnerHandle::Get()->PostDelayedTask(
+  base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
       FROM_HERE,
       base::BindOnce(&BrowserView::MaybeShowReadingListInSidePanelIPH,
                      GetAsWeakPtr()),
