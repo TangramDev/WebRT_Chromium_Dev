@@ -1660,7 +1660,6 @@ class CONTENT_EXPORT RenderFrameHostImpl
   void DisableBackForwardCache(BackForwardCache::DisabledSource source,
                                BackForwardCache::DisabledReasonType reason);
   void DisableBackForwardCache(BackForwardCache::DisabledReason reason);
-  void ClearDisableBackForwardCache(BackForwardCache::DisabledReason reason);
 
   bool is_evicted_from_back_forward_cache() {
     return is_evicted_from_back_forward_cache_;
@@ -2272,6 +2271,7 @@ class CONTENT_EXPORT RenderFrameHostImpl
                             RunModalPromptDialogCallback callback) override;
   void RunBeforeUnloadConfirm(bool is_reload,
                               RunBeforeUnloadConfirmCallback callback) override;
+  void WillPotentiallyStartNavigation(const GURL& url) override;
   void UpdateFaviconURL(
       std::vector<blink::mojom::FaviconURLPtr> favicon_urls) override;
   void DownloadURL(blink::mojom::DownloadURLParamsPtr params) override;
@@ -2740,6 +2740,10 @@ class CONTENT_EXPORT RenderFrameHostImpl
     kFencedFrameRoot,
     kIframeNestedWithinFencedFrame
   };
+
+  void SnapshotDocumentForViewTransition(
+      blink::mojom::LocalFrame::SnapshotDocumentForViewTransitionCallback
+          callback);
 
  protected:
   friend class RenderFrameHostFactory;

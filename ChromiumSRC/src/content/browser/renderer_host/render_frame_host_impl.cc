@@ -160,6 +160,7 @@
 #include "content/common/associated_interfaces.mojom.h"
 #include "content/common/content_navigation_policy.h"
 #include "content/common/debug_utils.h"
+#include "content/common/features.h"
 #include "content/common/frame.mojom.h"
 #include "content/common/frame_messages.mojom.h"
 #include "content/common/navigation_client.mojom.h"
@@ -273,6 +274,7 @@
 #include "content/browser/android/java_interfaces_impl.h"
 #include "content/browser/renderer_host/render_frame_host_android.h"
 #include "content/public/browser/android/java_interfaces.h"
+#include "content/public/browser/authenticator_request_client_delegate.h"
 #else
 #include "content/browser/hid/hid_service.h"
 #include "content/browser/host_zoom_map_impl.h"
@@ -862,30 +864,32 @@ bool VerifyThatBrowserAndRendererCalculatedOriginsToCommitMatch(
   // - blob urls with content scheme are opaque on browser side
   // (https://crbug.com/1295268)
   const url::Origin& renderer_side_origin = params.origin;
-  std::pair<url::Origin, std::string> browser_side_origin_and_debug_info =
-      navigation_request->GetOriginToCommitWithDebugInfo();
+  std::pair<absl::optional<url::Origin>, std::string>
+      browser_side_origin_and_debug_info =
+          navigation_request->GetOriginToCommitWithDebugInfo();
   if ((renderer_side_origin.opaque() ||
        renderer_side_origin.scheme() == url::kContentScheme) &&
-      browser_side_origin_and_debug_info.first.opaque()) {
+      browser_side_origin_and_debug_info.first->opaque()) {
     return true;
   }
 
   // TODO(https://crbug.com/888079): Remove the DumpWithoutCrashing below, once
   // we are sure that the `browser_side_origin` is always the same as the
   // `renderer_side_origin`.
-  if (browser_side_origin_and_debug_info.first != renderer_side_origin) {
+  if (browser_side_origin_and_debug_info.first.value() !=
+      renderer_side_origin) {
     NavigationRequest::ScopedCrashKeys navigation_request_crash_keys(
         *navigation_request);
     SCOPED_CRASH_KEY_STRING256(
         "", "browser_origin",
-        browser_side_origin_and_debug_info.first.GetDebugString());
+        browser_side_origin_and_debug_info.first->GetDebugString());
     SCOPED_CRASH_KEY_STRING256("", "browser_debug_info",
                                browser_side_origin_and_debug_info.second);
 
     SCOPED_CRASH_KEY_STRING256(
         "", "browser_ready_to_commit_origin",
         navigation_request->browser_side_origin_to_commit_with_debug_info()
-            .first.GetDebugString());
+            .first->GetDebugString());
     SCOPED_CRASH_KEY_STRING256(
         "", "browser_ready_to_commit_debug_info",
         navigation_request->browser_side_origin_to_commit_with_debug_info()
@@ -902,7 +906,8 @@ bool VerifyThatBrowserAndRendererCalculatedOriginsToCommitMatch(
     return false;
   }
 
-  DCHECK_EQ(browser_side_origin_and_debug_info.first, renderer_side_origin)
+  DCHECK_EQ(browser_side_origin_and_debug_info.first.value(),
+            renderer_side_origin)
       << "; navigation_request->GetURL() = " << navigation_request->GetURL();
   return true;
 }
@@ -1329,7 +1334,7 @@ class RenderFrameHostImpl::SubresourceLoaderFactoriesConfig {
   static SubresourceLoaderFactoriesConfig ForPendingNavigation(
       NavigationRequest& navigation_request) {
     SubresourceLoaderFactoriesConfig result;
-    result.origin_ = navigation_request.GetOriginToCommit();
+    result.origin_ = navigation_request.GetOriginToCommit().value();
     result.client_security_state_ =
         navigation_request.BuildClientSecurityState();
     result.ukm_source_id_ = ukm::SourceIdObj::FromInt64(
@@ -2162,11 +2167,6 @@ void RenderFrameHostImpl::DisableBackForwardCache(
     BackForwardCache::DisabledReason reason) {
   back_forward_cache_disabled_reasons_.insert(reason);
   MaybeEvictFromBackForwardCache();
-}
-
-void RenderFrameHostImpl::ClearDisableBackForwardCache(
-    BackForwardCache::DisabledReason reason) {
-  back_forward_cache_disabled_reasons_.erase(reason);
 }
 
 void RenderFrameHostImpl::DisableProactiveBrowsingInstanceSwapForTesting() {
@@ -5460,6 +5460,33 @@ void RenderFrameHostImpl::RunBeforeUnloadConfirm(
                                     std::move(dialog_closed_callback));
 }
 
+void RenderFrameHostImpl::WillPotentiallyStartNavigation(const GURL& url) {
+  TRACE_EVENT1("navigation",
+               "RenderFrameHostImpl::WillPotentiallyStartNavigation", "url",
+               url);
+
+  GURL filtered_url(url);
+  GetProcess()->FilterURL(/*empty_allowed=*/false, &filtered_url);
+  if (filtered_url == GURL(kBlockedURL))
+    return;
+
+  // Ask the service worker context to speculatively start a service worker for
+  // the request URL if necessary for optimization purposes. There are cases
+  // where we have already started the service worker (e.g, Prerendering or the
+  // previous navigation already started the service worker), but this call does
+  // nothing if the service worker already started for the URL.
+  if (base::FeatureList::IsEnabled(kSpeculativeServiceWorkerStartup)) {
+    if (ServiceWorkerContext* context =
+            GetStoragePartition()->GetServiceWorkerContext()) {
+      const blink::StorageKey key(url::Origin::Create(filtered_url));
+      if (context->MaybeHasRegistrationForStorageKey(key)) {
+        context->StartServiceWorkerForNavigationHint(filtered_url, key,
+                                                     base::DoNothing());
+      }
+    }
+  }
+}
+
 // TODO(crbug.com/1213863): Move this method to content::PageImpl.
 void RenderFrameHostImpl::UpdateFaviconURL(
     std::vector<blink::mojom::FaviconURLPtr> favicon_urls) {
@@ -6721,7 +6748,7 @@ void RenderFrameHostImpl::EnterFullscreen(
     return;
   }
 
-  // Allow sites with the window-placement permission to open a popup window
+  // Allow sites with the Window Management permission to open a popup window
   // after requesting fullscreen on a specific screen of a multi-screen device.
   // This enables multi-screen content experiences from a single user gesture.
   const display::Screen* screen = display::Screen::GetScreen();
@@ -9934,6 +9961,14 @@ void RenderFrameHostImpl::RequestAXTreeSnapshot(
   RequestAXTreeSnapshot(std::move(callback), std::move(params));
 }
 
+void RenderFrameHostImpl::SnapshotDocumentForViewTransition(
+    blink::mojom::LocalFrame::SnapshotDocumentForViewTransitionCallback
+        callback) {
+  DCHECK(IsRenderFrameLive());
+  GetAssociatedLocalFrame()->SnapshotDocumentForViewTransition(
+      std::move(callback));
+}
+
 void RenderFrameHostImpl::RequestAXTreeSnapshot(
     AXTreeSnapshotCallback callback,
     mojom::SnapshotAccessibilityTreeParamsPtr params) {
@@ -12470,7 +12505,8 @@ void RenderFrameHostImpl::SendCommitNavigation(
         navigation_request->isolation_info_for_subresources()
             .network_isolation_key());
 
-    url::Origin origin_to_commit = navigation_request->GetOriginToCommit();
+    url::Origin origin_to_commit =
+        navigation_request->GetOriginToCommit().value();
     // Make sure the origin of the isolation info and origin to commit match,
     // otherwise the cookie manager will crash. Sending the cookie manager here
     // is just an optimization, so it is fine for it to be null in the case
@@ -13975,6 +14011,14 @@ RenderFrameHostImpl::PerformGetAssertionWebAuthSecurityChecks(
     return std::make_pair(status, is_cross_origin);
   }
 
+  if (!GetContentClient()
+           ->browser()
+           ->GetWebAuthenticationDelegate()
+           ->IsSecurityLevelAcceptableForWebAuthn(this)) {
+    return std::make_pair(blink::mojom::AuthenticatorStatus::CERTIFICATE_ERROR,
+                          is_cross_origin);
+  }
+
   status = GetWebAuthRequestSecurityChecker()->ValidateDomainAndRelyingPartyID(
       effective_origin, relying_party_id, request_type,
       remote_desktop_client_override);
@@ -13999,6 +14043,13 @@ RenderFrameHostImpl::PerformMakeCredentialWebAuthSecurityChecks(
           effective_origin, request_type, &is_cross_origin);
   if (status != blink::mojom::AuthenticatorStatus::SUCCESS) {
     return status;
+  }
+
+  if (!GetContentClient()
+           ->browser()
+           ->GetWebAuthenticationDelegate()
+           ->IsSecurityLevelAcceptableForWebAuthn(this)) {
+    return blink::mojom::AuthenticatorStatus::CERTIFICATE_ERROR;
   }
 
   status = GetWebAuthRequestSecurityChecker()->ValidateDomainAndRelyingPartyID(
