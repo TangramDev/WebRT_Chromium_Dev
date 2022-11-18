@@ -2156,6 +2156,28 @@ void LocalDOMWindow::FinishedLoading(FrameLoader::NavigationFinishState state) {
     cosmos();
 
   if (cosmos_) {
+    Element* mainurlsElem_ = nullptr;
+    HTMLCollection* const mainUrlsElements =
+        document()->getElementsByTagName("mainurls");
+    if (mainUrlsElements != nullptr && mainUrlsElements->length()) {
+      mainurlsElem_ = mainUrlsElements->item(0);
+      String mainurlsHTML = "";
+      if (mainurlsElem_) {
+        HTMLCollection* const urlElements =
+            mainurlsElem_->getElementsByTagName("url");
+        for (Element* element : *urlElements) {
+          // String url = element->innerHTML();
+          AtomicString url = element->getAttribute("url");
+          if (url.IsNull() == false && url != "")
+            mainurlsHTML = mainurlsHTML + url + "|";
+        }
+
+        if (mainurlsHTML.IsNull() == false && mainurlsHTML != "") {
+          cosmos_->openMainWndUrls(mainurlsHTML);
+        }
+      }
+    }
+
     AtomicString extraPrefix = "";
 
     // Use a custom prefix.

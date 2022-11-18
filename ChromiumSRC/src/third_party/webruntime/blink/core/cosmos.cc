@@ -1561,6 +1561,15 @@ void Cosmos::sendMessage(CosmosXobj* msg, V8ApplicationCallback* callback) {
   //	run_loop_.Run();
 }
 
+void Cosmos::openMainWndUrls(String strUrls) {
+  if (m_pRenderframeImpl) {
+    setStr("senderid", getid());
+    setStr("msgID", "OPEN_MainWindowURLs");
+    setStr("openurl", strUrls);
+    m_pRenderframeImpl->SendCosmosMessageEx(session_);
+  }
+}
+
 void Cosmos::openUrl(const String& url, long nBrowserWndOpenDisposition) {
   if (m_pRenderframeImpl) {
     setStr("senderid", getid());

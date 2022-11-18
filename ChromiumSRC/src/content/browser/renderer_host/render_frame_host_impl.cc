@@ -14501,7 +14501,8 @@ void RenderFrameHostImpl::SendCosmosMessage(CommonUniverse::IPCSession* var) {
 void RenderFrameHostImpl::SendCosmosMessage(CommonUniverse::IPCMsg* pMsg) {
   if (pMsg->m_strId.CompareNoCase(_T("OPEN_URL")) == 0) {
     OpenURL(pMsg->m_strParam1, pMsg->m_strParam2);
-  } else if (pMsg->m_strId.CompareNoCase(_T("ADD_URL")) == 0) {
+  } else if (pMsg->m_strId.CompareNoCase(_T("ADD_URL")) == 0 ||
+             pMsg->m_strId.CompareNoCase(_T("OPEN_MainWindowURLs")) == 0) {
     USES_CONVERSION;
     CString strURLs = pMsg->m_strParam1;
     WebContents* pContents = content::WebContents::FromRenderFrameHost(this);
