@@ -46,6 +46,7 @@
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/public/web/web_picture_in_picture_window_options.h"
 #include "third_party/blink/renderer/bindings/core/v8/binding_security.h"
+#include "third_party/blink/renderer/bindings/core/v8/capture_source_location.h"
 #include "third_party/blink/renderer/bindings/core/v8/isolated_world_csp.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
@@ -116,6 +117,7 @@
 #include "third_party/blink/renderer/core/layout/deferred_shaping_controller.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
+#include "third_party/blink/renderer/core/navigation_api/navigation_api.h"
 #include "third_party/blink/renderer/core/origin_trials/origin_trial_context.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/create_window.h"
@@ -127,6 +129,7 @@
 #include "third_party/blink/renderer/core/scroll/scroll_types.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
 #include "third_party/blink/renderer/core/timing/dom_window_performance.h"
+#include "third_party/blink/renderer/core/timing/soft_navigation_heuristics.h"
 #include "third_party/blink/renderer/core/timing/window_performance.h"
 #include "third_party/blink/renderer/core/trustedtypes/trusted_type_policy_factory.h"
 #include "third_party/blink/renderer/core/trustedtypes/trusted_types_util.h"
@@ -820,11 +823,6 @@ Document* LocalDOMWindow::InstallNewDocument(const DocumentInit& init) {
   document_ = init.CreateDocument();
   document_->Initialize();
 
-  // If early body loading is turned on, UpdateDocument() will be called right
-  // after the body starts loading.
-  if (!base::FeatureList::IsEnabled(features::kEarlyBodyLoad))
-    GetScriptController().UpdateDocument();
-
   document_->GetViewportData().UpdateViewportDescription();
 
   auto* frame_scheduler = GetFrame()->GetFrameScheduler();
@@ -940,14 +938,38 @@ void LocalDOMWindow::DispatchPagehideEvent(
 
 void LocalDOMWindow::EnqueueHashchangeEvent(const String& old_url,
                                             const String& new_url) {
+  DCHECK(GetFrame());
+  if (GetFrame()->IsMainFrame()) {
+    auto* script_state = ToScriptStateForMainWorld(GetFrame());
+    DCHECK(script_state);
+    SoftNavigationHeuristics* heuristics =
+        SoftNavigationHeuristics::From(*this);
+    heuristics->SawURLChange(script_state, new_url);
+  }
   // https://html.spec.whatwg.org/C/#history-traversal
   EnqueueWindowEvent(*HashChangeEvent::Create(old_url, new_url),
                      TaskType::kDOMManipulation);
 }
 
 void LocalDOMWindow::DispatchPopstateEvent(
-    scoped_refptr<SerializedScriptValue> state_object) {
+    scoped_refptr<SerializedScriptValue> state_object,
+    absl::optional<scheduler::TaskAttributionId>
+        soft_navigation_heuristics_task_id) {
   DCHECK(GetFrame());
+  // This unique_ptr maintains the TaskScope alive for the lifetime of the
+  // method.
+  std::unique_ptr<scheduler::TaskAttributionTracker::TaskScope>
+      task_attribution_scope;
+  if (soft_navigation_heuristics_task_id) {
+    ScriptState* script_state = ToScriptStateForMainWorld(GetFrame());
+    DCHECK(ThreadScheduler::Current());
+    auto* tracker = ThreadScheduler::Current()->GetTaskAttributionTracker();
+    if (script_state && tracker) {
+      task_attribution_scope = tracker->CreateTaskScope(
+          script_state, soft_navigation_heuristics_task_id,
+          scheduler::TaskAttributionTracker::TaskScopeType::kPopState);
+    }
+  }
   DispatchEvent(*PopStateEvent::Create(std::move(state_object), history()));
 }
 
@@ -1091,7 +1113,9 @@ Screen* LocalDOMWindow::screen() {
     int64_t display_id =
         frame ? frame->GetChromeClient().GetScreenInfo(*frame).display_id
               : Screen::kInvalidDisplayId;
-    screen_ = MakeGarbageCollected<Screen>(this, display_id);
+    screen_ = MakeGarbageCollected<Screen>(
+        this, display_id, /*use_size_override=*/
+        !RuntimeEnabledFeatures::FullscreenScreenSizeMatchesDisplayEnabled());
   }
   return screen_.Get();
 }
@@ -1104,40 +1128,40 @@ History* LocalDOMWindow::history() {
 
 BarProp* LocalDOMWindow::locationbar() {
   if (!locationbar_) {
-    locationbar_ = MakeGarbageCollected<BarProp>(this, BarProp::kLocationbar);
+    locationbar_ = MakeGarbageCollected<BarProp>(this);
   }
   return locationbar_.Get();
 }
 
 BarProp* LocalDOMWindow::menubar() {
   if (!menubar_)
-    menubar_ = MakeGarbageCollected<BarProp>(this, BarProp::kMenubar);
+    menubar_ = MakeGarbageCollected<BarProp>(this);
   return menubar_.Get();
 }
 
 BarProp* LocalDOMWindow::personalbar() {
   if (!personalbar_) {
-    personalbar_ = MakeGarbageCollected<BarProp>(this, BarProp::kPersonalbar);
+    personalbar_ = MakeGarbageCollected<BarProp>(this);
   }
   return personalbar_.Get();
 }
 
 BarProp* LocalDOMWindow::scrollbars() {
   if (!scrollbars_) {
-    scrollbars_ = MakeGarbageCollected<BarProp>(this, BarProp::kScrollbars);
+    scrollbars_ = MakeGarbageCollected<BarProp>(this);
   }
   return scrollbars_.Get();
 }
 
 BarProp* LocalDOMWindow::statusbar() {
   if (!statusbar_)
-    statusbar_ = MakeGarbageCollected<BarProp>(this, BarProp::kStatusbar);
+    statusbar_ = MakeGarbageCollected<BarProp>(this);
   return statusbar_.Get();
 }
 
 BarProp* LocalDOMWindow::toolbar() {
   if (!toolbar_)
-    toolbar_ = MakeGarbageCollected<BarProp>(this, BarProp::kToolbar);
+    toolbar_ = MakeGarbageCollected<BarProp>(this);
   return toolbar_.Get();
 }
 
@@ -1151,6 +1175,12 @@ Navigator* LocalDOMWindow::navigator() {
   if (!navigator_)
     navigator_ = MakeGarbageCollected<Navigator>(this);
   return navigator_.Get();
+}
+
+NavigationApi* LocalDOMWindow::navigation() {
+  if (!navigation_)
+    navigation_ = MakeGarbageCollected<NavigationApi>(this);
+  return navigation_.Get();
 }
 
 void LocalDOMWindow::SchedulePostMessage(PostedMessage* posted_message) {
@@ -1321,11 +1351,7 @@ Element* LocalDOMWindow::frameElement() const {
   if (!GetFrame())
     return nullptr;
 
-  FrameOwner* owner = GetFrame()->Owner();
-  if (owner && owner->GetFramePolicy().is_fenced)
-    return nullptr;
-
-  return DynamicTo<HTMLFrameOwnerElement>(owner);
+  return DynamicTo<HTMLFrameOwnerElement>(GetFrame()->Owner());
 }
 
 void LocalDOMWindow::print(ScriptState* script_state) {
@@ -2156,28 +2182,6 @@ void LocalDOMWindow::FinishedLoading(FrameLoader::NavigationFinishState state) {
     cosmos();
 
   if (cosmos_) {
-    Element* mainurlsElem_ = nullptr;
-    HTMLCollection* const mainUrlsElements =
-        document()->getElementsByTagName("mainurls");
-    if (mainUrlsElements != nullptr && mainUrlsElements->length()) {
-      mainurlsElem_ = mainUrlsElements->item(0);
-      String mainurlsHTML = "";
-      if (mainurlsElem_) {
-        HTMLCollection* const urlElements =
-            mainurlsElem_->getElementsByTagName("url");
-        for (Element* element : *urlElements) {
-          // String url = element->innerHTML();
-          AtomicString url = element->getAttribute("url");
-          if (url.IsNull() == false && url != "")
-            mainurlsHTML = mainurlsHTML + url + "|";
-        }
-
-        if (mainurlsHTML.IsNull() == false && mainurlsHTML != "") {
-          cosmos_->openMainWndUrls(mainurlsHTML);
-        }
-      }
-    }
-
     AtomicString extraPrefix = "";
 
     // Use a custom prefix.
@@ -2203,6 +2207,29 @@ void LocalDOMWindow::FinishedLoading(FrameLoader::NavigationFinishState state) {
     if (list->length()) {
       cosmosElem = list->item(0);
       if (cosmosElem) {
+        //  cosmos()->sendMessage("OPEN_MainWindowURLs", "1", "1", "", "", "");
+        //Element* mainurlsElem_ = nullptr;
+        //HTMLCollection* const mainUrlsElements =
+        //    cosmosElem->getElementsByTagName("mainurls");
+        //if (mainUrlsElements->length()) {
+        //  mainurlsElem_ = mainUrlsElements->item(0);
+        //  String mainurlsHTML = "";
+        //  if (mainurlsElem_) {
+        //    HTMLCollection* const urlElements =
+        //        mainurlsElem_->getElementsByTagName("url");
+        //    for (Element* element : *urlElements) {
+        //      cosmos_->openMainWndUrls("1");
+        //      // String url = element->innerHTML();
+        //      AtomicString url = element->getAttribute("url");
+        //      if (url.IsNull() == false && url != "")
+        //        mainurlsHTML = mainurlsHTML + url + "|";
+        //    }
+
+        //    if (mainurlsHTML.IsNull() == false && mainurlsHTML != "") {
+        //      cosmos_->openMainWndUrls(mainurlsHTML);
+        //    }
+        //  }
+        //}
         AtomicString enableConsoleInfo =
             cosmosElem->getAttribute("consoleinfo");
         if (enableConsoleInfo.IsNull() == false && enableConsoleInfo != "" &&
@@ -2285,6 +2312,8 @@ DOMWindow* LocalDOMWindow::open(v8::Isolate* isolate,
     return nullptr;
 
   UseCounter::Count(*entered_window, WebFeature::kDOMWindowOpen);
+  entered_window->CountUseOnlyInCrossOriginIframe(
+      WebFeature::kDOMWindowOpenCrossOriginIframe);
   if (!features.empty())
     UseCounter::Count(*entered_window, WebFeature::kDOMWindowOpenFeatures);
 
@@ -2442,6 +2471,7 @@ void LocalDOMWindow::Trace(Visitor* visitor) const {
   visitor->Trace(media_);
   visitor->Trace(custom_elements_);
   visitor->Trace(external_);
+  visitor->Trace(navigation_);
   visitor->Trace(visualViewport_);
   visitor->Trace(event_listener_observers_);
   visitor->Trace(current_event_);
@@ -2516,11 +2546,11 @@ void LocalDOMWindow::DidBufferLoadWhileInBackForwardCache(size_t num_bytes) {
   BackForwardCacheBufferLimitTracker::Get().DidBufferBytes(num_bytes);
 }
 
-bool LocalDOMWindow::anonymouslyFramed() const {
+bool LocalDOMWindow::credentialless() const {
   return GetExecutionContext()
       ->GetPolicyContainer()
       ->GetPolicies()
-      .is_anonymous;
+      .is_credentialless;
 }
 
 bool LocalDOMWindow::IsInFencedFrame() const {

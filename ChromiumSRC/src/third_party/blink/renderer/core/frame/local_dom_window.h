@@ -35,6 +35,7 @@
 #include "third_party/blink/public/common/frame/fullscreen_request_token.h"
 #include "third_party/blink/public/common/frame/payment_request_token.h"
 #include "third_party/blink/public/common/metrics/post_message_counter.h"
+#include "third_party/blink/public/common/scheduler/task_attribution_id.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -79,6 +80,7 @@ class LocalFrame;
 class MediaQueryList;
 class MessageEvent;
 class Modulator;
+class NavigationApi;
 class Navigator;
 class Screen;
 class ScriptController;
@@ -422,7 +424,9 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   void EnqueueDocumentEvent(Event&, TaskType);
   void EnqueueNonPersistedPageshowEvent();
   void EnqueueHashchangeEvent(const String& old_url, const String& new_url);
-  void DispatchPopstateEvent(scoped_refptr<SerializedScriptValue>);
+  void DispatchPopstateEvent(scoped_refptr<SerializedScriptValue>,
+                             absl::optional<scheduler::TaskAttributionId>
+                                 soft_navigation_heuristics_task_id);
   void DispatchWindowLoadEvent();
   void DocumentWasClosed();
 
@@ -492,8 +496,8 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   // frame is in back-forward cache.
   void DidBufferLoadWhileInBackForwardCache(size_t num_bytes);
 
-  // Whether the window is anonymous or not.
-  bool anonymouslyFramed() const;
+  // Whether the window is credentialless or not.
+  bool credentialless() const;
 
   bool IsInFencedFrame() const override;
 
@@ -509,6 +513,11 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
 
   void IncrementNavigationId() { navigation_id_++; }
   uint32_t GetNavigationId() const { return navigation_id_; }
+
+  NavigationApi* navigation();
+
+  // Is this a Document Picture in Picture window?
+  bool IsPictureInPictureWindow() const;
 
  protected:
   // EventTarget overrides.
@@ -534,8 +543,6 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
 
   void DispatchLoadEvent();
 
-  // Is this a Document Picture in Picture window?
-  bool IsPictureInPictureWindow() const;
   void SetIsPictureInPictureWindow();
 
   // Return the viewport size including scrollbars.
@@ -564,6 +571,8 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   // begin Add by TangramTeam
   mutable Member<Cosmos> cosmos_;
   // end Add by TangramTeam
+
+  Member<NavigationApi> navigation_;
 
   String status_;
   String default_status_;
@@ -641,7 +650,7 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   HistoryUserActivationState history_user_activation_state_;
 
   // If set, this window is a Document Picture in Picture window.
-  // https://github.com/steimelchrome/document-pip-explainer/blob/main/explainer.md
+  // https://wicg.github.io/document-picture-in-picture/
   bool is_picture_in_picture_window_ = false;
 
   // The navigation id of a document is to identify navigation of special types

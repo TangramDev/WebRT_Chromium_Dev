@@ -24,6 +24,10 @@
 #include "mojo/public/cpp/system/invitation.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
+#if BUILDFLAG(IS_ANDROID)
+#include "base/memory/memory_pressure_listener.h"
+#endif
+
 // begin Add by TangramTeam
 #include "components/version_info/version_info.h"
 #include "third_party/webruntime/UniverseForChromium.h"
@@ -101,6 +105,12 @@ class CONTENT_EXPORT ChildProcessHostImpl
 
   base::Process& GetPeerProcess();
   mojom::ChildProcess* child_process() { return child_process_.get(); }
+
+#if BUILDFLAG(IS_ANDROID)
+  // Notifies the child process of memory pressure level.
+  void NotifyMemoryPressureToChildProcess(
+      base::MemoryPressureListener::MemoryPressureLevel level);
+#endif
 
  private:
   friend class content::ChildProcessHost;

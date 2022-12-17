@@ -63,7 +63,6 @@ class BrowserViewLayout :
 
   // |browser_view| may be null in tests.
   BrowserViewLayout(std::unique_ptr<BrowserViewLayoutDelegate> delegate,
-                    gfx::NativeView host_view,
                     BrowserView* browser_view,
                     views::View* top_container,
                     TabStripRegionView* tab_strip_region_view,
@@ -188,9 +187,6 @@ class BrowserViewLayout :
 
   // The delegate interface. May be a mock in tests.
   const std::unique_ptr<BrowserViewLayoutDelegate> delegate_;
-
-  // The view against which the web dialog is positioned and parented.
-  gfx::NativeView const host_view_;
 
   // The owning browser view.
   const raw_ptr<BrowserView, DanglingUntriaged> browser_view_;
