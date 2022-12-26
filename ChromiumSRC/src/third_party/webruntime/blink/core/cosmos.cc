@@ -917,6 +917,7 @@ void Cosmos::DispatchXobjEvent(CosmosXobj* xObj,
         xObj->setWorkElement(eventObjlist->item(0));
       }
     }
+    xObj->setSender(xObj);
     xObj->DispatchEvent(*blink::CosmosEvent::Create(
         blink::webrt_event_type_names::kCloudmessageforcloudform, xObj));
   } else if (xObj->grid() && !bXobjMsgProcessed) {
@@ -927,7 +928,8 @@ void Cosmos::DispatchXobjEvent(CosmosXobj* xObj,
         xObj->setWorkElement(eventObjlist->item(0));
       }
     }
-    xObj->form()->DispatchEvent(*blink::CosmosEvent::Create(
+    xObj->setSender(xObj);
+    xObj->DispatchEvent(*blink::CosmosEvent::Create(
         blink::webrt_event_type_names::kCloudmessageforxobj, xObj));
   }
 }
