@@ -28,7 +28,7 @@ Unzip the Patch zip you downloaded.</p>
   
 About <i>[ChromiumVer.txt](https://github.com/TangramDev/WebRT_Chromium_Dev/blob/main/ChromiumVer.txt)</i>
 </h1>
-<h2><p>Each Chromium WebRT Patch contains a file "ChromiumVer.txt" to specify the Tag of the Chromium Project version corresponding to the Patch, for example: 108.0.5414.2.</p>
+<h2><p>Each Chromium WebRT Patch contains a file "ChromiumVer.txt" to specify the Tag of the Chromium Project version corresponding to the Patch, for example: 110.0.5481.22.</p>
 </h2>
 
 
@@ -65,7 +65,7 @@ Merge the [Chromium WebRT Patch](https://github.com/TangramDev/WebRT_Chromium_De
 <h2 align=center>
 <p align=left>
 
-<div align=left>If you have successfully fetched the source code of the Chromium Project, assuming that the path of the folder where your source code is located is "d:\webrt\m108", we first need to create a "Base branch", you need to Give this branch an appropriate name, eg "Base".</div><br/>
+<div align=left>If you have successfully fetched the source code of the Chromium Project, assuming that the path of the folder where your source code is located is "d:\webrt\m110", we first need to create a "Base branch", you need to Give this branch an appropriate name, eg "Base".</div><br/>
 <div align=center id="BaseBranch"><img src="https://user-images.githubusercontent.com/26355688/199427816-d8b37d95-7350-44b3-8df6-efd953e6055e.jpg" width="80%"/></div> </p>
 
 <div align=left>
@@ -77,7 +77,7 @@ Unzip the [Chromium WebRT Patch Archive](https://github.com/TangramDev/WebRT_Chr
 <div align=left>
 <p>After copying all batch files,You need to open "cmd.exe" as administrator, and execute the following command:
 
-	$ cd/d d:\webrt\m108\src
+	$ cd/d d:\webrt\m110\src
 
 as shown in the following figure:</p>
 <div align=center id="cmd"><img src="https://user-images.githubusercontent.com/26355688/199431665-1aa299b4-d1ec-4c6d-83ad-865541a214d6.jpg" width="75%"/></div> </p>
@@ -87,9 +87,9 @@ as shown in the following figure:</p>
 </p>
 <p>
 	
-Here, "<ins>109.0.5414.x</ins>" is the Tag value contained in <i>[ChromiumVer.txt](https://github.com/TangramDev/WebRT_Chromium_Dev/blob/main/ChromiumVer.txt)</i>, and "Base" is the branch name of "Base Branch"</p>
+Here, "<ins>110.0.5481.x</ins>" is the Tag value contained in <i>[ChromiumVer.txt](https://github.com/TangramDev/WebRT_Chromium_Dev/blob/main/ChromiumVer.txt)</i>, and "Base" is the branch name of "Base Branch"</p>
 
-<p>Copy the folder "ChromiumSRC\src" (this folder is included in the unzipped folder of Chromium WebRT Patch) to "d:\WebRT\M108\src", execute the following command:
+<p>Copy the folder "ChromiumSRC\src" (this folder is included in the unzipped folder of Chromium WebRT Patch) to "d:\WebRT\M110\src", execute the following command:
 	
 	$ git add . && git commit -am "WebRuntime Support"
 </p>
@@ -98,7 +98,7 @@ Here, "<ins>109.0.5414.x</ins>" is the Tag value contained in <i>[ChromiumVer.tx
 
 <h1 align=center>
 
-WebRuntime based on <br/>a <i>Specific Chromium Project Dev Version: 109.0.5414.x</i>
+WebRuntime based on <br/>a <i>Specific Chromium Project Dev Version: 110.0.5481.x</i>
 </h1>
 <h2>
 <p>Execute the following command:
