@@ -1,2 +1,2 @@
 @echo off
-git fetch origin tag 109.0.5414.%1 &&git checkout -b %2 109.0.5414.%1&& gclient sync -D
+git fetch origin tag 110.0.5481.%1 &&git checkout -b %2 110.0.5481.%1&& gclient sync -D
